@@ -30,6 +30,8 @@ const PHOTO_FOLDER = '現場写真';
 // ---------- 初期化 ----------
 function setup() {
   const ss = SpreadsheetApp.getActive();
+  // 新規スプレッドシートは米国時間のことがある。日時の文字列を日本時間で読ませる
+  ss.setSpreadsheetTimeZone('Asia/Tokyo');
   const ensure = (name, cols) => {
     let sh = ss.getSheetByName(name);
     if (!sh) sh = ss.insertSheet(name);
