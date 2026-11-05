@@ -62,14 +62,31 @@ a.ext{color:var(--blu);font-weight:600;text-decoration:none}
 #login h2{margin:0 0 4px;font-size:18px}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;z-index:3000;pointer-events:none}
 #toast.show{opacity:1}
-#listbtn{position:fixed;right:10px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:900;border-radius:999px;padding:10px 14px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
-#sheet #list{display:none}
-#sheet #list.open{display:block}
-#list .item{padding:8px 14px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center}
-#list .item .dot{width:10px;height:10px;border-radius:50%}
-#list .item small{display:block;color:var(--muted)}
-#list .item .ym{font-size:12px;color:var(--muted);white-space:nowrap;text-align:right}
-#list .item .ym b{display:block;color:var(--fg)}
+/* タブ */
+.tabs{display:flex;gap:2px;margin-right:6px}
+.tabs span{padding:4px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:rgba(255,255,255,.7)}
+.tabs span.on{background:#fff;color:var(--acc);font-weight:700}
+body.list #map{display:none}
+#listpage{display:none;flex:1;overflow:auto;background:var(--panel)}
+body.list #listpage{display:block}
+/* 一覧：スマホはカード */
+.item{padding:8px 14px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center;cursor:pointer}
+.item:hover{background:#f6f4ee}
+.item .dot{width:10px;height:10px;border-radius:50%}
+.item small{display:block;color:var(--muted)}
+.item .ym{font-size:12px;color:var(--muted);white-space:nowrap;text-align:right}
+.item .ym b{display:block;color:var(--fg)}
+table.lt{display:none;border-collapse:collapse;width:100%;font-size:13px}
+table.lt th{position:sticky;top:0;background:#ece9df;text-align:left;padding:6px 8px;font-weight:600;color:var(--muted);white-space:nowrap;cursor:pointer}
+table.lt td{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+table.lt tr{cursor:pointer}table.lt tbody tr:hover{background:#f6f4ee}
+table.lt td.w{white-space:normal;min-width:160px}
+table.lt .fl{font-size:11px;color:#2a6b2e}
+/* PC：一覧は表、詳細は右パネル */
+@media (min-width:900px){
+  .item{display:none} table.lt{display:table}
+  #sheet{left:auto;top:0;bottom:0;width:440px;max-height:none;border-radius:0;box-shadow:-4px 0 20px rgba(0,0,0,.2)}
+}
 .leaflet-control-attribution{font-size:9px}
 </style>
 </head>
@@ -84,6 +101,7 @@ a.ext{color:var(--blu);font-weight:600;text-decoration:none}
 
 <header>
   <h1>現場マップ</h1>
+  <div class="tabs"><span class="on" data-t="map">地図</span><span data-t="list">一覧</span></div>
   <span class="chip" data-c="赤"><i class="dot" style="background:var(--red)"></i>60日 <b></b></span>
   <span class="chip" data-c="黄"><i class="dot" style="background:var(--yel)"></i>90日 <b></b></span>
   <span class="chip" data-c="青"><i class="dot" style="background:var(--blu)"></i>120日 <b></b></span>
@@ -96,12 +114,11 @@ a.ext{color:var(--blu);font-weight:600;text-decoration:none}
   <span class="chip" id="reload">更新</span>
 </header>
 <div id="map"></div>
-<button class="btn" id="listbtn">一覧</button>
+<div id="listpage"></div>
 
 <div id="sheet">
   <div class="hd"><div class="t" id="s_title"></div><button class="close" id="s_close">×</button></div>
   <div class="bd" id="s_body"></div>
-  <div class="bd" id="list"></div>
 </div>
 <div id="toast"></div>
 
@@ -193,12 +210,27 @@ function render() {
   });
   renderList();
 }
+let sortKey = 'due', sortAsc = true;
 function renderList() {
   const order = ['赤', '黄', '青', '灰', '未定', '完成済'];
-  const items = DATA.sitesX.filter(visible).sort((a, b) => order.indexOf(a.cat) - order.indexOf(b.cat) || (a.days ?? 9e9) - (b.days ?? 9e9));
-  $('#list').innerHTML = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? '完成' : 'あと' + s.days + '日') : ''}` : '未定'}</div></div>`).join('') || '<div style="padding:14px;color:var(--muted)">該当なし</div>';
-  $('#list').querySelectorAll('.item').forEach(el => el.onclick = () => { const s = DATA.sitesX.find(x => x['現場名'] === el.dataset.s); if (s.lat) map.setView([s.lat, s.lng], 16); openSite(el.dataset.s); });
+  let items = DATA.sitesX.filter(visible);
+  const keyf = { due: s => [order.indexOf(s.cat), s.days ?? 9e9], name: s => s['現場名'], moto: s => s['元請'], last: s => s.visits[0]?.['日時'] || '' }[sortKey];
+  items.sort((a, b) => { const x = keyf(a), y = keyf(b); const r = Array.isArray(x) ? (x[0] - y[0] || x[1] - y[1]) : String(x).localeCompare(String(y), 'ja'); return sortAsc ? r : -r; });
+  const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? '完成' : 'あと' + s.days + '日') : ''}` : '未定';
+  const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}</div></div>`).join('');
+  const th = (k, t) => `<th data-k="${k}">${t}${sortKey === k ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>`;
+  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td><b>${esc(s['現場名'])}</b>${s['要確認'] ? ` <span style="color:var(--red)">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? s.due.replace(/-/g, '/') : s.due.slice(0, 7).replace('-', '/') + '（月）') : '未定'}</td><td>${s.days != null ? (s.days < 0 ? '完成' : s.days) : ''}</td><td>${s.ex['建築確認検査日'] ? s.ex['建築確認検査日'].slice(0, 10).replace(/-/g, '/') : ''}</td><td class="fl">${FLAGS.filter(f => s[f] === '〇').join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td></tr>`).join('');
+  $('#listpage').innerHTML = (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
+    `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
+  $('#listpage').querySelectorAll('th[data-k]').forEach(el => el.onclick = () => { if (sortKey === el.dataset.k) sortAsc = !sortAsc; else { sortKey = el.dataset.k; sortAsc = true; } renderList(); });
 }
+function showTab(t) {
+  document.body.classList.toggle('list', t === 'list');
+  document.querySelectorAll('.tabs span').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+  if (t === 'map') setTimeout(() => map.invalidateSize(), 50);
+}
+document.querySelectorAll('.tabs span').forEach(x => x.onclick = () => showTab(x.dataset.t));
 
 // ===== 物件シート =====
 function gpsText() {
@@ -210,7 +242,7 @@ function gpsText() {
 }
 function openSite(name) {
   const s = DATA.sitesX.find(x => x['現場名'] === name); if (!s) return;
-  curSite = name; $('#list').classList.remove('open');
+  curSite = name;
   $('#s_title').innerHTML = `${esc(s['現場名'])}<small>${esc(s['元請'])}${s['職人'] ? ' ／ ' + esc(s['職人']) : ''}</small>`;
   const ex = s.ex, flags = FLAGS.map(f => `<span class="${s[f] === '〇' ? 'on' : ''}">${f}${s[f] === '／' ? '／' : ''}</span>`).join('');
   const dueTxt = s.due ? (s.dueExact ? s.due.replace(/-/g, '/') + '（消検日）' : s.due.slice(0, 7).replace('-', '/') + '（消検月）') : '未定';
@@ -278,8 +310,7 @@ $('#unvisited').onclick = e => { unvisitedOnly = !unvisitedOnly; e.target.classL
 $('#moto').onchange = e => { motoF = e.target.value; render(); };
 $('#q').oninput = e => { q = e.target.value.trim(); render(); };
 $('#reload').onclick = () => load(true).then(ok => ok && toast('更新しました'));
-$('#s_close').onclick = () => { $('#sheet').classList.remove('open'); curSite = null; $('#list').classList.remove('open'); };
-$('#listbtn').onclick = () => { curSite = null; $('#s_title').innerHTML = '一覧<small>完成が近い順</small>'; $('#s_body').innerHTML = ''; $('#list').classList.add('open'); $('#sheet').classList.add('open'); };
+$('#s_close').onclick = () => { $('#sheet').classList.remove('open'); curSite = null; };
 
 // ===== ログイン =====
 (async function init() {
