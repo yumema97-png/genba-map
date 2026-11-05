@@ -87,6 +87,7 @@ function doPost(e) {
   try {
     if (body.action === 'visit') return json(addVisit(body));
     if (body.action === 'extra') return json(saveExtra(body));
+    if (body.action === 'deleteVisit') return json(deleteVisit(body));
     return json({ ok: false, error: 'unknown action' });
   } finally {
     lock.releaseLock();
@@ -101,10 +102,32 @@ function addVisit(b) {
   return { ok: true, photos: urls };
 }
 
+// 訪問記録を1行消す。日時・現場名・記録者が一致する行。写真はドライブのゴミ箱へ（30日は戻せる）
+function deleteVisit(b) {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.visits);
+  const data = sh.getDataRange().getValues();
+  for (let i = data.length - 1; i >= 1; i--) {
+    const r = data[i];
+    const at = r[0] instanceof Date ? Utilities.formatDate(r[0], 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss") : String(r[0]);
+    if (at === b.at && r[2] === b.site && String(r[1]) === String(b.by || '')) {
+      String(r[5] || '').split('\n').filter(Boolean).forEach(id => { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) {} });
+      sh.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: '該当する記録が見つかりません（更新してからもう一度）' };
+}
+
+// 日付 "2026-12-01" と時刻 "10:00"（任意）を、シートが日時として読む文字列にする
+function dateTime(d, t) {
+  if (!d) return '';
+  return d.replace(/-/g, '/') + (t ? ' ' + t : '');
+}
+
 function saveExtra(b) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.extra);
   const data = sh.getDataRange().getValues();
-  const row = [b.site, b.fireDate || '', b.bldgDate || '', b.delivery || '', b.progress || '', new Date(), b.user || ''];
+  const row = [b.site, dateTime(b.fireDate, b.fireTime), dateTime(b.bldgDate, b.bldgTime), b.delivery || '', b.progress || '', new Date(), b.user || ''];
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === b.site) {
       sh.getRange(i + 1, 1, 1, row.length).setValues([row]);

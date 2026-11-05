@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#2b2f36">
+<meta name="apple-mobile-web-app-title" content="現場マップ">
 <title>現場マップ</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 :root{--bg:#f3f1ec;--panel:#fff;--fg:#22251f;--muted:#6c6f66;--line:#ddd9ce;--red:#d64541;--yel:#e0a82e;--blu:#2f6fba;--gry:#8a8d84;--non:#cfcbc0;--done:#b9b6ad;--acc:#2b2f36;--font:"Hiragino Sans","Yu Gothic UI","Noto Sans JP",system-ui,sans-serif}
@@ -45,6 +49,11 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .row label{font-size:12px;color:var(--muted)}
 input[type=date],select.f,textarea,input.f{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff;width:100%}
 textarea{min-height:60px;resize:vertical}
+input[type=time]{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff}
+.row.dt{flex-wrap:nowrap}.row.dt label{width:96px;flex:none}.row.dt input[type=date]{flex:1;min-width:0;width:auto}.row.dt input[type=time]{width:92px;flex:none}
+button.clr{border:0;background:#eee;border-radius:50%;width:26px;height:26px;flex:none;color:var(--muted)}
+button.del{float:right;border:1px solid var(--line);background:#fff;color:var(--red);border-radius:5px;font-size:11px;padding:1px 7px}
+#who{cursor:pointer}
 .btn{border:0;border-radius:8px;padding:9px 14px;background:var(--acc);color:#fff;font-weight:600}
 .btn.sub{background:#e9e6dd;color:var(--fg)}
 .btn:disabled{opacity:.5}
@@ -93,8 +102,8 @@ table.lt .fl{font-size:11px;color:#2a6b2e}
 <body>
 <div id="login"><form id="loginf">
   <h2>現場マップ</h2>
-  <label>記録者<select id="l_user" class="f"></select></label>
   <label>パスワード<input id="l_pw" class="f" type="password" autocomplete="current-password"></label>
+  <label>記録者<select id="l_user" class="f"></select></label>
   <button class="btn" type="submit">開く</button>
   <div id="l_msg" style="color:var(--red);font-size:12px"></div>
 </form></div>
@@ -112,6 +121,7 @@ table.lt .fl{font-size:11px;color:#2a6b2e}
   <select id="moto"><option value="">元請：全部</option></select>
   <input type="search" id="q" placeholder="現場名で検索">
   <span class="chip" id="reload">更新</span>
+  <span class="chip" id="who" title="記録者を切り替える"></span>
 </header>
 <div id="map"></div>
 <div id="listpage"></div>
@@ -190,6 +200,10 @@ function build() {
   render();
   if (curSite) openSite(curSite);
 }
+// 日時の値は "2026-12-01T10:00:00"。時刻 00:00 は「時刻なし」として扱う
+const dPart = v => String(v || '').slice(0, 10);
+const tPart = v => { const t = String(v || '').slice(11, 16); return t === '00:00' ? '' : t; };
+const fmtDT = v => v ? dPart(v).replace(/-/g, '/') + (tPart(v) ? ' ' + tPart(v) : '') : '';
 function endOfMonth(ym) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m, 0); return `${y}-${String(m).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function visible(s) {
   if (!on[s.cat]) return false;
@@ -219,7 +233,7 @@ function renderList() {
   const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? '完成' : 'あと' + s.days + '日') : ''}` : '未定';
   const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}</div></div>`).join('');
   const th = (k, t) => `<th data-k="${k}">${t}${sortKey === k ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>`;
-  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td><b>${esc(s['現場名'])}</b>${s['要確認'] ? ` <span style="color:var(--red)">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? s.due.replace(/-/g, '/') : s.due.slice(0, 7).replace('-', '/') + '（月）') : '未定'}</td><td>${s.days != null ? (s.days < 0 ? '完成' : s.days) : ''}</td><td>${s.ex['建築確認検査日'] ? s.ex['建築確認検査日'].slice(0, 10).replace(/-/g, '/') : ''}</td><td class="fl">${FLAGS.filter(f => s[f] === '〇').join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td></tr>`).join('');
+  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td><b>${esc(s['現場名'])}</b>${s['要確認'] ? ` <span style="color:var(--red)">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? fmtDT(s.ex['消検日']) : s.due.slice(0, 7).replace('-', '/') + '（月）') : '未定'}</td><td>${s.days != null ? (s.days < 0 ? '完成' : s.days) : ''}</td><td>${fmtDT(s.ex['建築確認検査日'])}</td><td class="fl">${FLAGS.filter(f => s[f] === '〇').join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td></tr>`).join('');
   $('#listpage').innerHTML = (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
     `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th></tr></thead><tbody>${rows}</tbody></table>`;
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
@@ -245,8 +259,10 @@ function openSite(name) {
   curSite = name;
   $('#s_title').innerHTML = `${esc(s['現場名'])}<small>${esc(s['元請'])}${s['職人'] ? ' ／ ' + esc(s['職人']) : ''}</small>`;
   const ex = s.ex, flags = FLAGS.map(f => `<span class="${s[f] === '〇' ? 'on' : ''}">${f}${s[f] === '／' ? '／' : ''}</span>`).join('');
-  const dueTxt = s.due ? (s.dueExact ? s.due.replace(/-/g, '/') + '（消検日）' : s.due.slice(0, 7).replace('-', '/') + '（消検月）') : '未定';
-  const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' ? ` ／ ${v['距離m']}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}</div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="https://drive.google.com/file/d/${id}/view" target="_blank"><img src="https://drive.google.com/thumbnail?id=${id}&sz=w200" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
+  const dueTxt = s.due ? (s.dueExact ? fmtDT(ex['消検日']) + '（消検日）' : s.due.slice(0, 7).replace('-', '/') + '（消検月）') : '未定';
+  // 写真は lh3 の直リンクで出す（drive.google.com の閲覧画面だとログインを求められる）
+  const img = (id, w) => `https://lh3.googleusercontent.com/d/${encodeURIComponent(id)}=w${w}`;
+  const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' ? ` ／ ${v['距離m']}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}<button class="del" data-i="${i}">削除</button></div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="${img(id, 1600)}" target="_blank"><img src="${img(id, 200)}" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
   $('#s_body').innerHTML = `
   <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${s.days != null ? (s.days < 0 ? '' : `あと${s.days}日`) : ''}</span><a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}">Googleマップ ›</a></div>
     <div class="kv" style="margin-top:8px"><b>完成</b><span>${dueTxt}</span><b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
@@ -258,15 +274,18 @@ function openSite(name) {
     <div class="row" style="justify-content:space-between"><span class="gps" id="gps">${gpsText()}</span><button class="btn" id="v_send">記録する</button></div></div>
   <div class="sec"><h3>訪問履歴（${s.visits.length}件）</h3><div class="hist">${hist}</div></div>
   <div class="sec"><h3>物件情報（手入力）</h3>
-    <div class="row"><label style="width:110px">消検日</label><input type="date" id="e_fire" value="${(ex['消検日'] || '').slice(0, 10)}"></div>
-    <div class="row"><label style="width:110px">建築確認検査日</label><input type="date" id="e_bldg" value="${(ex['建築確認検査日'] || '').slice(0, 10)}"></div>
+    <div class="row dt"><label>消検日</label><input type="date" id="e_fire" value="${dPart(ex['消検日'])}"><input type="time" id="e_fireT" value="${tPart(ex['消検日'])}"><button class="clr" data-c="e_fire">×</button></div>
+    <div class="row dt"><label>建築確認検査日</label><input type="date" id="e_bldg" value="${dPart(ex['建築確認検査日'])}"><input type="time" id="e_bldgT" value="${tPart(ex['建築確認検査日'])}"><button class="clr" data-c="e_bldg">×</button></div>
+    <div class="gps">時刻は分かるときだけ。×で日時を消して保存すると空欄に戻ります</div>
     <div class="row"><label><input type="checkbox" id="e_del" ${ex['搬入'] ? 'checked' : ''}> 搬入済</label></div>
     <textarea id="e_prog" placeholder="自社工事の進捗メモ（配線済・器具待ち など）">${esc(ex['工事進捗メモ'])}</textarea>
     <div class="row" style="justify-content:flex-end"><button class="btn sub" id="e_save">保存</button></div>
     ${ex['更新日時'] ? `<div class="gps">最終更新 ${ex['更新日時'].slice(0, 16).replace('T', ' ')} ${esc(ex['更新者'])}</div>` : ''}</div>`;
   $('#sheet').classList.add('open');
   $('#v_send').onclick = () => sendVisit(s);
+  $('#s_body').querySelectorAll('button.del').forEach(b => b.onclick = () => delVisit(s, s.visits[+b.dataset.i]));
   $('#e_save').onclick = () => saveExtra(s);
+  $('#s_body').querySelectorAll('button.clr').forEach(b => b.onclick = () => { $('#' + b.dataset.c).value = ''; $('#' + b.dataset.c + 'T').value = ''; });
 }
 async function post(body) {
   body.pw = store.get('pw'); body.user = store.get('user');
@@ -284,10 +303,17 @@ async function sendVisit(s) {
     await post(body); toast('記録しました'); await load(true);
   } catch (e) { toast('送信失敗：' + e.message); btn.disabled = false; btn.textContent = '記録する'; }
 }
+async function delVisit(s, v) {
+  if (!v) return;
+  const n = String(v['写真'] || '').split('\n').filter(Boolean).length;
+  if (!confirm(`${v['日時'].slice(0, 16).replace('T', ' ')} ${v['記録者']} の記録を削除します。${n ? `\n写真${n}枚もドライブのゴミ箱へ移します。` : ''}\nよろしいですか？`)) return;
+  try { await post({ action: 'deleteVisit', site: s['現場名'], at: v['日時'], by: v['記録者'] }); toast('削除しました'); await load(true); }
+  catch (e) { toast('削除失敗：' + e.message); }
+}
 async function saveExtra(s) {
   const btn = $('#e_save'); btn.disabled = true;
   try {
-    await post({ action: 'extra', site: s['現場名'], fireDate: $('#e_fire').value, bldgDate: $('#e_bldg').value, delivery: $('#e_del').checked ? '〇' : '', progress: $('#e_prog').value.trim() });
+    await post({ action: 'extra', site: s['現場名'], fireDate: $('#e_fire').value, fireTime: $('#e_fireT').value, bldgDate: $('#e_bldg').value, bldgTime: $('#e_bldgT').value, delivery: $('#e_del').checked ? '〇' : '', progress: $('#e_prog').value.trim() });
     toast('保存しました'); await load(true);
   } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
 }
@@ -316,29 +342,42 @@ $('#s_close').onclick = () => { $('#sheet').classList.remove('open'); curSite = 
 (async function init() {
   const pw = store.get('pw'), user = store.get('user');
   // 記録者一覧は初回だけサーバから取る必要があるので、まずパスワードだけで試す
-  if (pw && user) { $('#login').style.display = 'none'; if (await load(false)) locate(); else showLogin(); }
+  if (pw && user) { $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; if (await load(false)) locate(); else showLogin(); }
   else showLogin();
 })();
+// 記録者の名前は設定シートにあり、パスワードが合ったときだけサーバから返る（名前を外に出さないため）
+function fillUsers(list) {
+  const sel = $('#l_user'); sel.innerHTML = '';
+  if (list && list.length) { sel.add(new Option('選んでください', '')); list.forEach(u => sel.add(new Option(u))); }
+  else sel.innerHTML = '<option value="">（パスワードを入れると選べます）</option>';
+  if (store.get('user') && list && list.includes(store.get('user'))) sel.value = store.get('user');
+}
 function showLogin() {
   $('#login').style.display = 'flex';
-  const sel = $('#l_user'); const cached = store.get('users'); sel.innerHTML = '';
-  if (cached) cached.split(',').forEach(u => sel.add(new Option(u)));
-  else sel.innerHTML = '<option value="">（パスワード入力後に選べます）</option>';
-  if (store.get('user')) sel.value = store.get('user');
+  const cached = store.get('users'); fillUsers(cached ? cached.split(',') : null);
+  if (store.get('pw')) $('#l_pw').value = store.get('pw');
 }
+let pending = null; // パスワード確認の結果（{pw, j}）
+async function checkPw() {
+  const pw = $('#l_pw').value; if (!pw) return null;
+  if (pending && pending.pw === pw) return pending.j;
+  $('#l_msg').textContent = '';
+  const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}&t=${Date.now()}`); const j = await r.json();
+  if (!j.ok) { $('#l_msg').textContent = j.error; return null; }
+  pending = { pw, j }; store.set('users', j.users.join(',')); fillUsers(j.users); return j;
+}
+$('#l_pw').onchange = () => checkPw().catch(() => $('#l_msg').textContent = '通信エラー');
 $('#loginf').onsubmit = async e => {
-  e.preventDefault(); const pw = $('#l_pw').value; $('#l_msg').textContent = '';
-  store.set('pw', pw);
+  e.preventDefault();
   try {
-    const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}`); const j = await r.json();
-    if (!j.ok) { $('#l_msg').textContent = j.error; return; }
-    store.set('users', j.users.join(','));
-    let user = $('#l_user').value;
-    if (!user) { showLogin(); $('#l_msg').textContent = '記録者を選んでください'; return; }
-    store.set('user', user); DATA = j; store.set('cache', JSON.stringify(j));
-    $('#login').style.display = 'none'; build(); locate();
+    const j = await checkPw(); if (!j) return;
+    const user = $('#l_user').value;
+    if (!user) { $('#l_msg').textContent = '記録者を選んでください'; return; }
+    store.set('pw', $('#l_pw').value); store.set('user', user); DATA = j; store.set('cache', JSON.stringify(j));
+    $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; build(); locate();
   } catch (err) { $('#l_msg').textContent = '通信エラー'; }
 };
+$('#who').onclick = () => showLogin();
 </script>
 </body>
 </html>
