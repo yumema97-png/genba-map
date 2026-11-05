@@ -26,7 +26,7 @@
 ## 未完了・次にやること
 1. ~~GAS デプロイ~~ **2026-11-05 済**。Apps Script「現場マップ」（現場マップDBにバインド、Drive API v3 追加）をウェブアプリ（実行者: 自分 / アクセス: 全員）でデプロイし、URLを `GAS_URL` に入れた。GETで物件165件・座標117件が返るのを確認。パスワードは設定シートで変更済み（Code.gs の初期値 `genba` は公開されているので使わない）。Code.gs を直したら「デプロイを管理」→ 既存デプロイを新バージョンで更新する（新規デプロイにするとURLが変わる）
    - Excel（`\\server1\共有2\営業\①.業務-営業調整資料\令和8年度　マンション物件.xlsx`）は**まだドライブに同期していない**。設定シートのExcelファイル名は `令和8年度　マンション物件.xlsx`（全角スペース）。同期ができるまで `importFromExcel` と週次トリガーは保留
-2. **GitHub Pages 有効化**：リポジトリ設定 → Pages → main / root（API経由では不可だった。手動）
+2. ~~GitHub Pages 有効化~~ **2026-11-05 済**。公開URL https://yumema97-png.github.io/genba-map/ 。`gh api -X POST repos/yumema97-png/genba-map/pages -f "source[branch]=main" -f "source[path]=/"` で有効化できた（以前の失敗はJSONの渡し方の問題）。ページからGASへのfetch（CORS）が通ることを確認
 3. 動作確認：実機で写真送信・GPS距離・物件追加の保存
 4. 完成済み48件の座標は未取得（初期非表示なので実害なし。importFromExcel で自動補完される見込み）
 5. 住所が読めない5件：パートナーガーデン、EASTARS BUILZING、CASPENビル、富士社屋、本町マンション。場所を仮定した件：緑町4丁目A/B（千歳と仮定）、青葉町1・2丁目（厚別区と仮定）、月寒東本村、平岸1条D棟、千歳市栄恵町、千歳市桜木町1丁目
