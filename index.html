@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2b2f36">
+<title>現場マップ</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#f3f1ec;--panel:#fff;--fg:#22251f;--muted:#6c6f66;--line:#ddd9ce;--red:#d64541;--yel:#e0a82e;--blu:#2f6fba;--gry:#8a8d84;--non:#cfcbc0;--done:#b9b6ad;--acc:#2b2f36;--font:"Hiragino Sans","Yu Gothic UI","Noto Sans JP",system-ui,sans-serif}
+*{box-sizing:border-box}html,body{height:100%;margin:0;overscroll-behavior:none}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);display:flex;flex-direction:column;font-size:14px}
+button,select,input,textarea{font:inherit}
+header{background:var(--acc);color:#fff;padding:calc(6px + env(safe-area-inset-top)) 10px 6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+header h1{font-size:15px;margin:0 4px 0 0;font-weight:700}
+.chip{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);color:#fff;border-radius:999px;padding:3px 9px;font-size:12px;cursor:pointer;display:inline-flex;gap:5px;align-items:center;user-select:none;white-space:nowrap}
+.chip .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.chip.off{opacity:.35}
+.chip.tog.on{background:#fff;color:var(--acc)}
+header input[type=search]{flex:1;min-width:90px;border:0;border-radius:6px;padding:4px 8px;font-size:13px}
+header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-width:120px}
+#map{flex:1;min-height:0}
+.pin{width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.45);position:relative}
+.pin.visited{opacity:.55}
+.pin.visited::after{content:"✓";position:absolute;inset:0;transform:rotate(45deg);color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:14px}
+.pin.flag{border-color:#000;border-width:3px}
+.pin.non{border-style:dashed;border-color:#555;background:#fff}
+#sheet{position:fixed;left:0;right:0;bottom:0;max-height:82%;background:var(--panel);border-radius:14px 14px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.25);transform:translateY(100%);transition:transform .2s;display:flex;flex-direction:column;z-index:1000;padding-bottom:env(safe-area-inset-bottom)}
+#sheet.open{transform:none}
+#sheet .hd{padding:10px 14px 6px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:8px}
+#sheet .hd .t{font-size:17px;font-weight:700;flex:1;min-width:0}
+#sheet .hd .t small{display:block;font-size:12px;color:var(--muted);font-weight:400}
+#sheet .close{border:0;background:#eee;border-radius:50%;width:30px;height:30px;font-size:16px}
+#sheet .bd{overflow:auto;padding:10px 14px 16px;display:flex;flex-direction:column;gap:12px}
+.sec{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.sec h3{margin:0 0 8px;font-size:13px;color:var(--muted);letter-spacing:.04em}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:13px}
+.kv b{font-weight:600;color:var(--muted)}
+.flags{display:flex;flex-wrap:wrap;gap:4px}
+.flags span{font-size:11px;padding:2px 7px;border-radius:4px;background:#eee;color:#999}
+.flags span.on{background:#dfeedc;color:#2a6b2e;font-weight:600}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;color:#fff;font-size:12px;font-weight:600}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row label{font-size:12px;color:var(--muted)}
+input[type=date],select.f,textarea,input.f{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff;width:100%}
+textarea{min-height:60px;resize:vertical}
+.btn{border:0;border-radius:8px;padding:9px 14px;background:var(--acc);color:#fff;font-weight:600}
+.btn.sub{background:#e9e6dd;color:var(--fg)}
+.btn:disabled{opacity:.5}
+.hist{display:flex;flex-direction:column;gap:8px}
+.hist .v{border-left:3px solid var(--line);padding:2px 10px}
+.hist .v:first-child{border-color:var(--acc)}
+.hist .v .d{font-size:12px;color:var(--muted)}
+.hist .v .s{font-weight:600}
+.ph{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.ph img{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee}
+.gps{font-size:12px;color:var(--muted)}
+a.ext{color:var(--blu);font-weight:600;text-decoration:none}
+#login{position:fixed;inset:0;background:var(--bg);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px}
+#login form{background:#fff;padding:22px;border-radius:12px;width:100%;max-width:320px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+#login h2{margin:0 0 4px;font-size:18px}
+#toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;z-index:3000;pointer-events:none}
+#toast.show{opacity:1}
+#listbtn{position:fixed;right:10px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:900;border-radius:999px;padding:10px 14px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+#sheet #list{display:none}
+#sheet #list.open{display:block}
+#list .item{padding:8px 14px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center}
+#list .item .dot{width:10px;height:10px;border-radius:50%}
+#list .item small{display:block;color:var(--muted)}
+#list .item .ym{font-size:12px;color:var(--muted);white-space:nowrap;text-align:right}
+#list .item .ym b{display:block;color:var(--fg)}
+.leaflet-control-attribution{font-size:9px}
+</style>
+</head>
+<body>
+<div id="login"><form id="loginf">
+  <h2>現場マップ</h2>
+  <label>記録者<select id="l_user" class="f"></select></label>
+  <label>パスワード<input id="l_pw" class="f" type="password" autocomplete="current-password"></label>
+  <button class="btn" type="submit">開く</button>
+  <div id="l_msg" style="color:var(--red);font-size:12px"></div>
+</form></div>
+
+<header>
+  <h1>現場マップ</h1>
+  <span class="chip" data-c="赤"><i class="dot" style="background:var(--red)"></i>60日 <b></b></span>
+  <span class="chip" data-c="黄"><i class="dot" style="background:var(--yel)"></i>90日 <b></b></span>
+  <span class="chip" data-c="青"><i class="dot" style="background:var(--blu)"></i>120日 <b></b></span>
+  <span class="chip" data-c="灰"><i class="dot" style="background:var(--gry)"></i>以降 <b></b></span>
+  <span class="chip off" data-c="未定"><i class="dot" style="background:var(--non)"></i>未定 <b></b></span>
+  <span class="chip off" data-c="完成済"><i class="dot" style="background:var(--done)"></i>完成済 <b></b></span>
+  <span class="chip tog" id="unvisited">未訪問のみ</span>
+  <select id="moto"><option value="">元請：全部</option></select>
+  <input type="search" id="q" placeholder="現場名で検索">
+  <span class="chip" id="reload">更新</span>
+</header>
+<div id="map"></div>
+<button class="btn" id="listbtn">一覧</button>
+
+<div id="sheet">
+  <div class="hd"><div class="t" id="s_title"></div><button class="close" id="s_close">×</button></div>
+  <div class="bd" id="s_body"></div>
+  <div class="bd" id="list"></div>
+</div>
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ===== 設定 =====
+const GAS_URL = 'PASTE_GAS_WEBAPP_URL_HERE';
+const BANDS = [[60, '赤'], [90, '黄'], [120, '青']]; // 残り日数 → 区分
+const STAGES = ['基礎', '躯体', '外装', 'ボード', '天井', '仕上げ', '完了'];
+// ===============
+
+const COL = { '赤': '#d64541', '黄': '#e0a82e', '青': '#2f6fba', '灰': '#8a8d84', '未定': '#cfcbc0', '完成済': '#b9b6ad' };
+const LABEL = { '赤': '60日以内', '黄': '90日以内', '青': '120日以内', '灰': '121日以降', '未定': '消検未定', '完成済': '完成済' };
+const FLAGS = ['図面', 'ELV', '見積', '受注', '発注', '着工', '設置', '下検査'];
+let DATA = null, on = { '赤': 1, '黄': 1, '青': 1, '灰': 1, '未定': 0, '完成済': 0 }, unvisitedOnly = false, motoF = '', q = '';
+let markers = {}, layer = L.layerGroup(), curSite = null, myPos = null;
+const $ = s => document.querySelector(s);
+const toast = m => { const t = $('#toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200); };
+const store = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ===== 地図 =====
+const map = L.map('map', { zoomControl: false }).setView([43.06, 141.37], 12);
+L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', { attribution: '地理院タイル', maxZoom: 18 }).addTo(map);
+L.control.zoom({ position: 'bottomleft' }).addTo(map);
+layer.addTo(map);
+let meMarker = null;
+function locate() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.watchPosition(p => {
+    myPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
+    if (!meMarker) meMarker = L.circleMarker([myPos.lat, myPos.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#1a73e8', fillOpacity: 1 }).addTo(map);
+    else meMarker.setLatLng([myPos.lat, myPos.lng]);
+    const g = $('#gps'); if (g) g.textContent = gpsText();
+  }, () => {}, { enableHighAccuracy: true, maximumAge: 10000 });
+}
+function dist(a, b) { const R = 6371000, toR = x => x * Math.PI / 180; const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng); const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(s)); }
+
+// ===== データ =====
+async function load(force) {
+  const pw = store.get('pw');
+  if (!force) { const c = store.get('cache'); if (c) { try { DATA = JSON.parse(c); build(); } catch (e) {} } }
+  try {
+    const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}&t=${Date.now()}`);
+    const j = await r.json();
+    if (!j.ok) { toast(j.error || '読み込み失敗'); return false; }
+    DATA = j; store.set('cache', JSON.stringify(j)); build(); return true;
+  } catch (e) { toast('通信エラー（キャッシュ表示中）'); return false; }
+}
+function build() {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const extra = {}; (DATA.extra || []).forEach(e => extra[e['現場名']] = e);
+  const visits = {}; (DATA.visits || []).forEach(v => (visits[v['現場名']] = visits[v['現場名']] || []).push(v));
+  Object.values(visits).forEach(a => a.sort((x, y) => y['日時'].localeCompare(x['日時'])));
+  const motos = new Set();
+  DATA.sitesX = (DATA.sites || []).map(s => {
+    const ex = extra[s['現場名']] || {};
+    let due = ex['消検日'] ? ex['消検日'].slice(0, 10) : (s['消検月'] ? endOfMonth(s['消検月']) : ''); // 月だけなら月末扱い
+    let cat = '未定', days = null;
+    if (due) {
+      days = Math.round((new Date(due) - today) / 86400000);
+      if (days < 0) cat = '完成済'; else { cat = '灰'; for (const [d, c] of BANDS) if (days <= d) { cat = c; break; } }
+    }
+    motos.add(s['元請']);
+    return { ...s, ex, due, dueExact: !!ex['消検日'], cat, days, visits: visits[s['現場名']] || [], lat: +s['緯度'] || null, lng: +s['経度'] || null };
+  });
+  const sel = $('#moto'); const cur = sel.value; sel.innerHTML = '<option value="">元請：全部</option>' + [...motos].map(m => `<option>${esc(m)}</option>`).join(''); sel.value = cur;
+  document.querySelectorAll('.chip[data-c]').forEach(ch => ch.querySelector('b').textContent = DATA.sitesX.filter(s => s.cat === ch.dataset.c).length);
+  render();
+  if (curSite) openSite(curSite);
+}
+function endOfMonth(ym) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m, 0); return `${y}-${String(m).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function visible(s) {
+  if (!on[s.cat]) return false;
+  if (unvisitedOnly && s.visits.length) return false;
+  if (motoF && s['元請'] !== motoF) return false;
+  if (q && !s['現場名'].includes(q)) return false;
+  return true;
+}
+function render() {
+  layer.clearLayers(); markers = {};
+  DATA.sitesX.forEach(s => {
+    if (!visible(s) || s.lat == null) return;
+    const cls = ['pin', s.cat === '未定' ? 'non' : '', s.visits.length ? 'visited' : '', s.dueExact ? 'flag' : ''].join(' ');
+    const icon = L.divIcon({ className: '', html: `<div class="${cls}" style="background:${COL[s.cat]}"></div>`, iconSize: [18, 18], iconAnchor: [9, 18] });
+    const m = L.marker([s.lat, s.lng], { icon }).on('click', () => openSite(s['現場名']));
+    m.bindTooltip(s['現場名'], { direction: 'top', offset: [0, -16] });
+    layer.addLayer(m); markers[s['現場名']] = m;
+  });
+  renderList();
+}
+function renderList() {
+  const order = ['赤', '黄', '青', '灰', '未定', '完成済'];
+  const items = DATA.sitesX.filter(visible).sort((a, b) => order.indexOf(a.cat) - order.indexOf(b.cat) || (a.days ?? 9e9) - (b.days ?? 9e9));
+  $('#list').innerHTML = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? '完成' : 'あと' + s.days + '日') : ''}` : '未定'}</div></div>`).join('') || '<div style="padding:14px;color:var(--muted)">該当なし</div>';
+  $('#list').querySelectorAll('.item').forEach(el => el.onclick = () => { const s = DATA.sitesX.find(x => x['現場名'] === el.dataset.s); if (s.lat) map.setView([s.lat, s.lng], 16); openSite(el.dataset.s); });
+}
+
+// ===== 物件シート =====
+function gpsText() {
+  if (!myPos) return '位置情報：取得中…';
+  const s = DATA.sitesX.find(x => x['現場名'] === curSite);
+  if (!s || s.lat == null) return `位置情報：取得済（精度±${Math.round(myPos.acc)}m）`;
+  const d = dist(myPos, s);
+  return `ピンから ${Math.round(d)}m（${d <= (DATA.radius || 300) ? '現地' : '現地外'}）`;
+}
+function openSite(name) {
+  const s = DATA.sitesX.find(x => x['現場名'] === name); if (!s) return;
+  curSite = name; $('#list').classList.remove('open');
+  $('#s_title').innerHTML = `${esc(s['現場名'])}<small>${esc(s['元請'])}${s['職人'] ? ' ／ ' + esc(s['職人']) : ''}</small>`;
+  const ex = s.ex, flags = FLAGS.map(f => `<span class="${s[f] === '〇' ? 'on' : ''}">${f}${s[f] === '／' ? '／' : ''}</span>`).join('');
+  const dueTxt = s.due ? (s.dueExact ? s.due.replace(/-/g, '/') + '（消検日）' : s.due.slice(0, 7).replace('-', '/') + '（消検月）') : '未定';
+  const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' ? ` ／ ${v['距離m']}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}</div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="https://drive.google.com/file/d/${id}/view" target="_blank"><img src="https://drive.google.com/thumbnail?id=${id}&sz=w200" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
+  $('#s_body').innerHTML = `
+  <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${s.days != null ? (s.days < 0 ? '' : `あと${s.days}日`) : ''}</span><a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}">Googleマップ ›</a></div>
+    <div class="kv" style="margin-top:8px"><b>完成</b><span>${dueTxt}</span><b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
+    <div class="flags" style="margin-top:8px">${flags}${ex['搬入'] ? '<span class="on">搬入</span>' : '<span>搬入</span>'}</div></div>
+  <div class="sec"><h3>訪問を記録</h3>
+    <div class="row"><label>建物の進捗</label><select class="f" id="v_stage"><option value="">選択</option>${STAGES.map(x => `<option>${x}</option>`).join('')}</select></div>
+    <textarea id="v_memo" placeholder="メモ"></textarea>
+    <div class="row"><input type="file" id="v_photo" accept="image/*" multiple capture="environment" style="font-size:12px"></div>
+    <div class="row" style="justify-content:space-between"><span class="gps" id="gps">${gpsText()}</span><button class="btn" id="v_send">記録する</button></div></div>
+  <div class="sec"><h3>訪問履歴（${s.visits.length}件）</h3><div class="hist">${hist}</div></div>
+  <div class="sec"><h3>物件情報（手入力）</h3>
+    <div class="row"><label style="width:110px">消検日</label><input type="date" id="e_fire" value="${(ex['消検日'] || '').slice(0, 10)}"></div>
+    <div class="row"><label style="width:110px">建築確認検査日</label><input type="date" id="e_bldg" value="${(ex['建築確認検査日'] || '').slice(0, 10)}"></div>
+    <div class="row"><label><input type="checkbox" id="e_del" ${ex['搬入'] ? 'checked' : ''}> 搬入済</label></div>
+    <textarea id="e_prog" placeholder="自社工事の進捗メモ（配線済・器具待ち など）">${esc(ex['工事進捗メモ'])}</textarea>
+    <div class="row" style="justify-content:flex-end"><button class="btn sub" id="e_save">保存</button></div>
+    ${ex['更新日時'] ? `<div class="gps">最終更新 ${ex['更新日時'].slice(0, 16).replace('T', ' ')} ${esc(ex['更新者'])}</div>` : ''}</div>`;
+  $('#sheet').classList.add('open');
+  $('#v_send').onclick = () => sendVisit(s);
+  $('#e_save').onclick = () => saveExtra(s);
+}
+async function post(body) {
+  body.pw = store.get('pw'); body.user = store.get('user');
+  const r = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) });
+  const j = await r.json(); if (!j.ok) throw new Error(j.error || '失敗'); return j;
+}
+async function sendVisit(s) {
+  const btn = $('#v_send'); const stage = $('#v_stage').value, memo = $('#v_memo').value.trim();
+  if (!stage && !memo && !$('#v_photo').files.length) return toast('進捗かメモを入れてください');
+  btn.disabled = true; btn.textContent = '送信中…';
+  try {
+    const photos = []; for (const f of $('#v_photo').files) photos.push(await shrink(f));
+    const body = { action: 'visit', site: s['現場名'], stage, memo, photos };
+    if (myPos) { body.lat = myPos.lat; body.lng = myPos.lng; if (s.lat != null) body.dist = dist(myPos, s); }
+    await post(body); toast('記録しました'); await load(true);
+  } catch (e) { toast('送信失敗：' + e.message); btn.disabled = false; btn.textContent = '記録する'; }
+}
+async function saveExtra(s) {
+  const btn = $('#e_save'); btn.disabled = true;
+  try {
+    await post({ action: 'extra', site: s['現場名'], fireDate: $('#e_fire').value, bldgDate: $('#e_bldg').value, delivery: $('#e_del').checked ? '〇' : '', progress: $('#e_prog').value.trim() });
+    toast('保存しました'); await load(true);
+  } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
+}
+function shrink(file) {
+  return new Promise(res => {
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const max = 1280, r = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', 0.75));
+    };
+    img.onerror = () => res(null); img.src = url;
+  });
+}
+
+// ===== UI =====
+document.querySelectorAll('.chip[data-c]').forEach(ch => ch.onclick = () => { const c = ch.dataset.c; on[c] = !on[c]; ch.classList.toggle('off', !on[c]); render(); });
+$('#unvisited').onclick = e => { unvisitedOnly = !unvisitedOnly; e.target.classList.toggle('on', unvisitedOnly); render(); };
+$('#moto').onchange = e => { motoF = e.target.value; render(); };
+$('#q').oninput = e => { q = e.target.value.trim(); render(); };
+$('#reload').onclick = () => load(true).then(ok => ok && toast('更新しました'));
+$('#s_close').onclick = () => { $('#sheet').classList.remove('open'); curSite = null; $('#list').classList.remove('open'); };
+$('#listbtn').onclick = () => { curSite = null; $('#s_title').innerHTML = '一覧<small>完成が近い順</small>'; $('#s_body').innerHTML = ''; $('#list').classList.add('open'); $('#sheet').classList.add('open'); };
+
+// ===== ログイン =====
+(async function init() {
+  const pw = store.get('pw'), user = store.get('user');
+  // 記録者一覧は初回だけサーバから取る必要があるので、まずパスワードだけで試す
+  if (pw && user) { $('#login').style.display = 'none'; if (await load(false)) locate(); else showLogin(); }
+  else showLogin();
+})();
+function showLogin() {
+  $('#login').style.display = 'flex';
+  const sel = $('#l_user'); const cached = store.get('users'); sel.innerHTML = '';
+  if (cached) cached.split(',').forEach(u => sel.add(new Option(u)));
+  else sel.innerHTML = '<option value="">（パスワード入力後に選べます）</option>';
+  if (store.get('user')) sel.value = store.get('user');
+}
+$('#loginf').onsubmit = async e => {
+  e.preventDefault(); const pw = $('#l_pw').value; $('#l_msg').textContent = '';
+  store.set('pw', pw);
+  try {
+    const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}`); const j = await r.json();
+    if (!j.ok) { $('#l_msg').textContent = j.error; return; }
+    store.set('users', j.users.join(','));
+    let user = $('#l_user').value;
+    if (!user) { showLogin(); $('#l_msg').textContent = '記録者を選んでください'; return; }
+    store.set('user', user); DATA = j; store.set('cache', JSON.stringify(j));
+    $('#login').style.display = 'none'; build(); locate();
+  } catch (err) { $('#l_msg').textContent = '通信エラー'; }
+};
+</script>
+</body>
+</html>
