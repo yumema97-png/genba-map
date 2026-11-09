@@ -153,7 +153,7 @@ function doGet(e) {
     ok: true,
     role,
     me: role === 'worker' ? a.name : undefined,
-    amounts: role === 'meeting' ? readSheet(AMOUNT_SHEET_()) : undefined,
+    amounts: role === 'meeting' ? amountsWithEdits_() : undefined,
     sites, extra, visits, drawings,
     users: role === 'worker' ? [a.name] : cfg('記録者').split(',').map(s => s.trim()).filter(Boolean),
     radius: Number(cfg('現地判定m')) || 300,
@@ -169,6 +169,8 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json({ ok: false, error: 'bad json' }); }
   const who = auth_(body.pw);
   if (!who.role) return json({ ok: false, error: 'パスワードが違います' });
+  // 金額を書けるのは会議用で入ったときだけ（普段用には金額を見せていないので、書かせもしない）
+  if (who.role !== 'meeting' && body.fields) delete body.fields['金額'];
   if (who.role === 'worker') {
     // 職人：できる操作と物件を絞る。記録者は本人の名前に固定（なりすまし防止）
     if (WORKER_ACTIONS.indexOf(body.action) < 0) return json({ ok: false, error: 'この操作はできません（業務部に頼んでください）' });
@@ -195,6 +197,7 @@ function doPost(e) {
     if (body.action === 'deleteSite') return json(deleteSite(body));
     if (body.action === 'setLocation') return json(setLocation(body));
     if (body.action === 'setFlag') return json(setFlag(body));
+    if (body.action === 'editSite') return json(editSite(body));
     if (body.action === 'addDrawing') return json(addDrawingRow_(body));
     if (body.action === 'deleteDrawing') return json(deleteDrawing(body));
     return json({ ok: false, error: 'unknown action' });
@@ -227,13 +230,73 @@ function allSites() {
   flagSheet();
   readSheet(FLAG_SHEET).forEach(f => {
     const s = by[f['現場名']], k = f['項目'];
-    if (!s || FLAG_KEYS.indexOf(k) < 0) return;
+    if (!s || EDIT_KEYS.indexOf(k) < 0) return; // 金額はここでは扱わない（会議用だけ amountsWithEdits_ で）
     if (String(s[k] || '') !== String(f['元の値'] || '')) return; // Excel側が変わった
     s['元_' + k] = String(s[k] || '');
     s[k] = String(f['値'] || '');
     s['アプリ_' + k] = 1;
   });
   return all;
+}
+
+// ---------- アプリでの編集（2026-11-09〜） ----------
+// Excelの物件の 元請・職人・消検月・注意点・図面〜下検査・金額 をアプリで変えた記録はシート「フラグ変更」に置く
+// （名前は昔のまま。中身は全項目の変更）。Excelがその後も同じ値ならアプリの値、Excel側が変わったらExcelを優先。
+// アプリで追加した物件は、元請〜注意点は物件手入力シートを直接書き換え、図面〜下検査・金額はここ（元の値は空）
+const EDIT_KEYS = ['元請', '職人', '消検月', '注意点'].concat(FLAG_KEYS);
+// いまのExcel側の値（記録の「元の値」）。アプリで追加した物件は空
+function baseValue_(site, key) {
+  if (key === '金額') { const a = readSheet(AMOUNT_SHEET_()).find(r => r['現場名'] === site); return a ? String(a['金額（千円）']) : ''; }
+  const s = readSheet(SHEETS.sites).find(r => r['現場名'] === site);
+  return s ? String(s[key] || '') : '';
+}
+// 1項目の変更を記録（Excelと同じ値に戻したら記録を消す）
+function setEdit_(site, key, value, base, user) {
+  const sh = flagSheet(), v = sh.getDataRange().getValues();
+  const same = String(value) === (FLAG_KEYS.indexOf(key) >= 0 ? normCircle(base) : String(base));
+  const row = [txt(site), key, txt(value), txt(base), new Date(), txt(user)];
+  for (let i = 1; i < v.length; i++) {
+    if (v[i][0] === site && v[i][1] === key) {
+      if (same) sh.deleteRow(i + 1); else sh.getRange(i + 1, 1, 1, row.length).setValues([row]);
+      return;
+    }
+  }
+  if (!same) sh.appendRow(row);
+}
+// 値を確かめる。だめなら理由を返す
+function checkEdit_(key, v) {
+  if (FLAG_KEYS.indexOf(key) >= 0) return FLAG_VALUES.indexOf(v) >= 0 ? '' : key + 'の値が不正です';
+  if (key === '消検月') return v === '' || /^\d{4}-\d{2}$/.test(v) ? '' : '消検月は 2026-12 の形で';
+  if (key === '金額') return v === '' || /^\d+(\.\d+)?$/.test(v) ? '' : '金額は数字（千円）で';
+  return EDIT_KEYS.indexOf(key) >= 0 ? '' : '変えられない項目です：' + key;
+}
+// 物件の項目を変える。fields = { 元請: 'CASE', 図面: '〇', 金額: '1340', … }（変えた項目だけ）
+// 金額は会議用で入ったときだけ（doPost で外している）
+function editSite(b) {
+  const site = b.site, f = b.fields || {};
+  for (const k in f) { const e = checkEdit_(k, clean(f[k])); if (e) return { ok: false, error: e }; }
+  const inExcel = !!findRow(SpreadsheetApp.getActive().getSheetByName(SHEETS.sites), site);
+  const mr = inExcel ? 0 : findRow(manualSheet(), site);
+  if (!inExcel && !mr) return { ok: false, error: '物件が見つかりません' };
+  for (const k in f) {
+    const v = clean(f[k]);
+    const col = ['元請', '職人', '消検月', '注意点'].indexOf(k);
+    if (mr && col >= 0) { manualSheet().getRange(mr, col + 2).setValue(txt(v)); continue; } // 手入力の物件はシートを直接
+    setEdit_(site, k, v, inExcel ? baseValue_(site, k) : '', b.user);
+  }
+  if (mr) manualSheet().getRange(mr, 11, 1, 2).setValues([[new Date(), txt(b.user)]]);
+  return { ok: true };
+}
+// 会議用に返す金額：Excelの金額＋アプリで入れた金額（Excel側が変わっていなければアプリの値）
+function amountsWithEdits_() {
+  const am = {}; readSheet(AMOUNT_SHEET_()).forEach(r => (am[r['現場名']] = r['金額（千円）']));
+  readSheet(FLAG_SHEET).forEach(f => {
+    if (f['項目'] !== '金額') return;
+    const n = f['現場名'], base = String(f['元の値'] || '');
+    if (String(am[n] == null ? '' : am[n]) !== base) return; // Excel側が変わった
+    am[n] = f['値'] === '' ? '' : Number(f['値']);
+  });
+  return Object.keys(am).map(n => ({ '現場名': n, '金額（千円）': am[n] }));
 }
 
 function flagSheet() {
@@ -247,21 +310,10 @@ function flagSheet() {
   return sh;
 }
 
-// 1つの項目を切り替える。base は画面に出ていた元の値（Excelの値）
+// 図面〜下検査を1つ切り替える（詳細のタップ）。元の値はサーバーでExcelから取る
 function setFlag(b) {
   if (FLAG_KEYS.indexOf(b.key) < 0 || FLAG_VALUES.indexOf(b.value) < 0) return { ok: false, error: '項目か値が不正です' };
-  const sh = flagSheet(), v = sh.getDataRange().getValues();
-  const base = String(b.base || '');
-  const same = b.value === normCircle(base); // Excelの ○（U+25CB）は 〇 と同じ扱い
-  const row = [txt(b.site), b.key, txt(b.value), txt(base), new Date(), txt(b.user)];
-  for (let i = 1; i < v.length; i++) {
-    if (v[i][0] === b.site && v[i][1] === b.key) {
-      if (same) sh.deleteRow(i + 1); // Excelと同じ値に戻したら記録は要らない
-      else sh.getRange(i + 1, 1, 1, row.length).setValues([row]);
-      return { ok: true };
-    }
-  }
-  if (!same) sh.appendRow(row);
+  setEdit_(b.site, b.key, b.value, baseValue_(b.site, b.key), b.user);
   return { ok: true };
 }
 
@@ -271,9 +323,11 @@ function normCircle(v) { return v === '○' ? '〇' : String(v || ''); }
 function pruneFlags_() {
   const sh = flagSheet(), v = sh.getDataRange().getValues();
   const xs = {}; readSheet(SHEETS.sites).forEach(s => (xs[s['現場名']] = s));
+  const am = {}; readSheet(AMOUNT_SHEET_()).forEach(r => (am[r['現場名']] = r['金額（千円）']));
   for (let i = v.length - 1; i >= 1; i--) {
-    const s = xs[v[i][0]];
-    if (s && String(s[v[i][1]] || '') !== String(v[i][3] || '')) sh.deleteRow(i + 1);
+    const s = xs[v[i][0]]; if (!s) continue; // Excelに無い物件（アプリで追加）は消さない
+    const now = v[i][1] === '金額' ? (am[v[i][0]] == null ? '' : am[v[i][0]]) : s[v[i][1]];
+    if (String(now == null ? '' : now) !== String(v[i][3] || '')) sh.deleteRow(i + 1);
   }
 }
 
@@ -308,6 +362,9 @@ function addSite(b) {
   const addr = clean(b.addr) || nameToAddress(name);
   const p = locate_(addr, b.lat, b.lng);
   manualSheet().appendRow([txt(name), txt(b.moto), txt(b.worker), txt(b.ym), txt(b.note), txt(addr), p.lat, p.lng, new Date(), txt(b.user), '', '']);
+  // 図面〜下検査・金額も一緒に入れられる（金額は会議用のときだけ doPost を通ってくる）
+  const f = b.fields || {};
+  for (const k in f) { const v = clean(f[k]); if (v !== '' && (FLAG_KEYS.indexOf(k) >= 0 || k === '金額') && !checkEdit_(k, v)) setEdit_(name, k, v, '', b.user); }
   return { ok: true, name, lat: p.lat, lng: p.lng, addr };
 }
 
