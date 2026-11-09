@@ -110,7 +110,7 @@ textarea{min-height:60px;resize:vertical}
 input[type=time]{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff}
 .row.dt{flex-wrap:nowrap}.row.dt label{width:96px;flex:none}.row.dt input[type=date]{flex:1;min-width:0;width:auto}.row.dt input[type=time]{width:92px;flex:none}
 button.clr{border:0;background:#eee;border-radius:50%;width:26px;height:26px;flex:none;color:var(--muted)}
-button.del{float:right;border:1px solid var(--line);background:#fff;color:var(--red);border-radius:5px;font-size:11px;padding:1px 7px}
+button.del{float:right;border:1px solid var(--line);background:#fff;color:var(--red);border-radius:6px;font-size:12px;padding:4px 10px;margin-left:8px}
 #who{cursor:pointer}#who:empty{display:none}
 .btn.sm{padding:5px 10px;font-size:12px}.btn.danger{color:var(--red)}
 .tag{font-size:11px;padding:2px 7px;border-radius:4px;background:#e6eefb;color:var(--blu);font-weight:600}
@@ -148,7 +148,7 @@ body.list #listpage{display:block}
 .item .ym{font-size:12px;color:var(--muted);white-space:nowrap;text-align:right}
 .item .ym b{display:block;color:var(--fg)}
 table.lt{display:none;border-collapse:collapse;width:100%;font-size:13px}
-table.lt th{position:sticky;top:0;background:#ece9df;text-align:left;padding:6px 8px;font-weight:600;color:var(--muted);white-space:nowrap;cursor:pointer}
+table.lt th{position:sticky;top:var(--mb,0);z-index:1;background:#ece9df;text-align:left;padding:6px 8px;font-weight:600;color:var(--muted);white-space:nowrap;cursor:pointer}
 table.lt td{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
 table.lt tr{cursor:pointer}table.lt tbody tr:hover{background:#f6f4ee}
 table.lt td.w{white-space:normal;min-width:160px}
@@ -156,8 +156,22 @@ table.lt .fl{font-size:11px;color:#2a6b2e}
 /* PC：一覧は表、詳細は右パネル */
 @media (min-width:900px){
   .item{display:none} table.lt{display:table}
-  #sheet{left:auto;top:0;bottom:0;width:440px;max-height:none;border-radius:0;box-shadow:-4px 0 20px rgba(0,0,0,.2)}
+  #sheet{left:auto;top:var(--hh,0);bottom:0;width:440px;max-height:none;border-radius:0;box-shadow:-4px 0 20px rgba(0,0,0,.2)}
 }
+/* スマホ：日付欄が狭くならないよう、見出しを上の段に */
+@media (max-width:600px){
+  .row.dt{flex-wrap:wrap}.row.dt label{width:100%}
+  header .chip{padding:5px 10px}
+}
+.leaflet-tooltip{white-space:normal;max-width:220px}
+table.lt td.nm{white-space:normal;min-width:9em;max-width:18em}
+small.sub{display:block;font-size:11px;color:var(--muted);font-weight:400}
+.flags span.ro{background:none;color:var(--muted);padding-left:4px}
+.imp{display:block;font-size:10px;font-weight:400;opacity:.75;line-height:1.1}
+.impline{padding:5px 14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+.ptag.b{background:#5b3f86}
+#pickbar{display:none;position:fixed;left:50%;top:calc(var(--hh,60px) + 10px);transform:translateX(-50%);z-index:1500;background:#22251f;color:#fff;padding:8px 10px 8px 14px;border-radius:10px;gap:10px;align-items:center;font-size:13px;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+#pickbar button{border:0;border-radius:6px;padding:5px 10px;background:#fff;color:#22251f;font-weight:600}
 .leaflet-control-attribution{font-size:9px}
 </style>
 </head>
@@ -171,23 +185,26 @@ table.lt .fl{font-size:11px;color:#2a6b2e}
 </form></div>
 
 <header>
-  <h1>現場マップ</h1>
+  <h1>現場マップ<small id="impinfo" class="imp"></small></h1>
   <div class="tabs"><span class="on" data-t="map">地図</span><span data-t="list">一覧</span></div>
   <span class="chip" data-c="赤"><i class="dot" style="background:var(--red)"></i>60日 <b></b></span>
   <span class="chip" data-c="黄"><i class="dot" style="background:var(--yel)"></i>90日 <b></b></span>
   <span class="chip" data-c="青"><i class="dot" style="background:var(--blu)"></i>120日 <b></b></span>
   <span class="chip" data-c="灰"><i class="dot" style="background:var(--gry)"></i>以降 <b></b></span>
+  <span class="chip" data-c="消検済" title="消防検査は済み、建築確認検査がまだ（建確日が未入力も含む）"><i class="dot" style="background:#8e6bb8"></i>消検済 <b></b></span>
   <span class="chip off" data-c="未定"><i class="dot" style="background:var(--non)"></i>未定 <b></b></span>
   <span class="chip off" data-c="完成済"><i class="dot" style="background:var(--done)"></i>完成済 <b></b></span>
   <span class="chip tog" id="unvisited">未訪問のみ</span>
   <span class="chip tog" id="firechip">消防署</span>
   <select id="moto"><option value="">元請：全部</option></select>
-  <input type="search" id="q" placeholder="現場名で検索">
+  <select id="worker"><option value="">職人：全員</option></select>
+  <input type="search" id="q" placeholder="現場名・正式名称で検索">
   <span class="chip" id="addsite">＋物件</span>
   <span class="chip" id="reload">更新</span>
   <span class="chip" id="who" title="記録者を切り替える"></span>
 </header>
 <div id="map"></div>
+<div id="pickbar"><span>地図をタップして位置を決めてください</span><button id="pickcancel">やめる</button></div>
 <div id="listpage"></div>
 
 <div id="sheet">
@@ -218,10 +235,10 @@ const FIRE = [
 const fireFor = addr => { const m = /札幌市(.+?区)/.exec(addr || ''); return m ? FIRE.find(f => f.ku === m[1]) : null; };
 // ===============
 
-const COL = { '赤': '#d64541', '黄': '#e0a82e', '青': '#2f6fba', '灰': '#8a8d84', '未定': '#cfcbc0', '完成済': '#b9b6ad' };
-const LABEL = { '赤': '60日以内', '黄': '90日以内', '青': '120日以内', '灰': '121日以降', '未定': '消検未定', '完成済': '完成済' };
+const COL = { '赤': '#d64541', '黄': '#e0a82e', '青': '#2f6fba', '灰': '#8a8d84', '消検済': '#8e6bb8', '未定': '#cfcbc0', '完成済': '#b9b6ad' };
+const LABEL = { '赤': '60日以内', '黄': '90日以内', '青': '120日以内', '灰': '121日以降', '消検済': '消検済（建確待ち）', '未定': '消検未定', '完成済': '完成済（建確も済）' };
 const FLAGS = ['図面', 'ELV', '見積', '受注', '発注', '着工', '設置', '下検査'];
-let DATA = null, on = { '赤': 1, '黄': 1, '青': 1, '灰': 1, '未定': 0, '完成済': 0 }, unvisitedOnly = false, motoF = '', q = '';
+let DATA = null, on = { '赤': 1, '黄': 1, '青': 1, '灰': 1, '消検済': 1, '未定': 0, '完成済': 0 }, unvisitedOnly = false, motoF = '', workerF = '', q = '';
 let markers = {}, layer = L.layerGroup(), curSite = null, myPos = null;
 const $ = s => document.querySelector(s);
 const toast = m => { const t = $('#toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200); };
@@ -254,20 +271,32 @@ function dist(a, b) { const R = 6371000, toR = x => x * Math.PI / 180; const dLa
 
 // ===== データ =====
 // 端末に残すキャッシュには金額を入れない（会議用PC以外に残らないように）
-const saveCache = () => { const { amounts, role, ...rest } = DATA; store.set('cache', JSON.stringify(rest)); };
+// sitesX（表示用に作った物件。会議用だと各物件に amount が入る）も外す
+const saveCache = () => { const { amounts, role, sitesX, ...rest } = DATA; store.set('cache', JSON.stringify(rest)); };
 let MEET = false; // 会議用パスワードで入ったとき true（金額を出す）
 let MOTO_ORDER = [];
 const motoIdx = m => { const i = MOTO_ORDER.indexOf(m); return i < 0 ? 999 : i; };
 const yen = v => v === '' || v == null ? '' : Number(v).toLocaleString('ja-JP');
+// 戻り値：'ok' 取れた／'auth' パスワードが違う／'net' 通信できない（圏外など。キャッシュのまま使う）
 async function load(force) {
   const pw = store.get('pw');
   if (!force) { const c = store.get('cache'); if (c) { try { DATA = JSON.parse(c); build(); } catch (e) {} } }
   try {
     const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}&t=${Date.now()}`);
     const j = await r.json();
-    if (!j.ok) { toast(j.error || '読み込み失敗'); return false; }
-    DATA = j; saveCache(); build(); return true;
-  } catch (e) { toast('通信エラー（キャッシュ表示中）'); return false; }
+    if (!j.ok) { toast(j.error || '読み込み失敗'); return /パスワード/.test(j.error || '') ? 'auth' : 'net'; }
+    // 取り込みの途中などで物件が0件で返ったら、今の表示とキャッシュを残す
+    if (!(j.sites || []).length && DATA && (DATA.sites || []).length) { toast('物件が0件で返ってきました。少し待って「更新」を押してください'); return 'net'; }
+    DATA = j; saveCache(); build(); return 'ok';
+  } catch (e) { toast(DATA ? '通信できません（前回のデータを表示中）' : '通信できません'); return 'net'; }
+}
+// 詳細パネルで入力の途中か（このときは再取得で画面を作り直さない）
+function isEditing() {
+  if (!$('#sheet').classList.contains('open') || !curSite) return false;
+  const a = document.activeElement;
+  if (a && $('#s_body').contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return true;
+  if (($('#v_memo') || {}).value || ($('#v_stage') || {}).value || (($('#v_photo') || {}).files || []).length) return true;
+  return extraChanged() !== null && Object.keys(extraChanged()).length > 0;
 }
 function build() {
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -277,24 +306,43 @@ function build() {
   MEET = DATA.role === 'meeting';
   document.body.classList.toggle('meet', MEET);
   const am = {}; (DATA.amounts || []).forEach(a => am[a['現場名']] = a['金額（千円）']);
-  const motos = new Set();
-  DATA.sitesX = (DATA.sites || []).map(s => {
+  const motos = new Set(), workers = new Set();
+  const band = d => { for (const [n, c] of BANDS) if (d <= n) return c; return '灰'; };
+  const daysTo = ymd => Math.round((new Date(dPart(ymd)) - today) / 86400000);
+  DATA.sitesX = (DATA.sites || []).map(s0 => {
+    const s = { ...s0, '元請': s0['元請'] || '（元請なし）' };
     const ex = extra[s['現場名']] || {};
     let due = ex['消検日'] ? ex['消検日'].slice(0, 10) : (s['消検月'] ? endOfMonth(s['消検月']) : ''); // 月だけなら月末扱い
-    let cat = '未定', days = null;
+    let cat = '未定', days = null, phase = '消検';
     if (due) {
-      days = Math.round((new Date(due) - today) / 86400000);
-      if (days < 0) cat = '完成済'; else { cat = '灰'; for (const [d, c] of BANDS) if (days <= d) { cat = c; break; } }
+      days = daysTo(due);
+      if (days >= 0) cat = band(days);
+      else {
+        // 消防検査が済んでも建築確認検査があるので消さない。建確日が過ぎて初めて「完成済」
+        const b = ex['建築確認検査日'];
+        if (!b) cat = '消検済';
+        else if (daysTo(b) >= 0) { phase = '建確'; days = daysTo(b); cat = band(days); }
+        else cat = '完成済';
+      }
     }
     motos.add(s['元請']);
-    return { ...s, amount: am[s['現場名']] ?? '', ex, due, dueExact: !!ex['消検日'], cat, days, visits: visits[s['現場名']] || [], lat: +s['緯度'] || null, lng: +s['経度'] || null };
+    splitW(s['職人']).forEach(w => workers.add(w));
+    return { ...s, alias: String(ex['正式名称'] || ''), amount: am[s['現場名']] ?? '', ex, due, dueExact: !!ex['消検日'], cat, days, phase, visits: visits[s['現場名']] || [], lat: +s['緯度'] || null, lng: +s['経度'] || null };
   });
   MOTO_ORDER = [...motos].filter(Boolean); // 物件シートの並び＝Excelのシートの順（アプリで追加した物件の新しい元請は最後）
-  const sel = $('#moto'); const cur = sel.value; sel.innerHTML = '<option value="">元請：全部</option>' + MOTO_ORDER.map(m => `<option>${esc(m)}</option>`).join(''); sel.value = cur;
+  if (motoF && !MOTO_ORDER.includes(motoF)) motoF = '';
+  const sel = $('#moto'); sel.innerHTML = '<option value="">元請：全部</option>' + MOTO_ORDER.map(m => `<option>${esc(m)}</option>`).join(''); sel.value = motoF;
+  const ws = [...workers].sort((a, b) => a.localeCompare(b, 'ja'));
+  if (workerF && !ws.includes(workerF)) workerF = '';
+  const wsel = $('#worker'); wsel.innerHTML = '<option value="">職人：全員</option>' + ws.map(w => `<option>${esc(w)}</option>`).join(''); wsel.value = workerF;
+  const fmtShort = v => v ? `${+v.slice(5, 7)}/${+v.slice(8, 10)} ${v.slice(11, 16)}` : '';
+  $('#impinfo').textContent = DATA.importedAt ? `Excel取込 ${fmtShort(DATA.importedAt)}` : '';
+  $('#impinfo').title = DATA.excelAt ? `取り込んだExcelの更新日時：${fmtShort(DATA.excelAt)}（火・土の夜にサーバーから複製、翌朝取り込み）` : '';
   document.querySelectorAll('.chip[data-c]').forEach(ch => ch.querySelector('b').textContent = DATA.sitesX.filter(s => s.cat === ch.dataset.c).length);
   render();
-  if (curSite) openSite(curSite);
+  if (curSite && !isEditing()) openSite(curSite);
 }
+const splitW = v => String(v || '').split(/[、,，・\s]+/).filter(Boolean);
 // 日時の値は "2026-12-01T10:00:00"。時刻 00:00 は「時刻なし」として扱う
 const normF = v => (v === '○' ? '〇' : String(v || '')); // Excelの○は2種類ある
 const dPart = v =>String(v || '').slice(0, 10);
@@ -306,7 +354,8 @@ function visible(s, ignoreMoto = false) {
   if (!MEET && !on[s.cat]) return false;
   if (!MEET && unvisitedOnly && s.visits.length) return false;
   if (motoF && s['元請'] !== motoF && !ignoreMoto) return false;
-  if (q && !s['現場名'].includes(q)) return false;
+  if (workerF && !splitW(s['職人']).includes(workerF)) return false;
+  if (q && !s['現場名'].includes(q) && !(s.alias || '').includes(q)) return false;
   return true;
 }
 function render() {
@@ -315,24 +364,28 @@ function render() {
     if (!visible(s) || s.lat == null) return;
     const cls = ['pin', s.cat === '未定' ? 'non' : '', s.visits.length ? 'visited' : '', s.dueExact ? 'flag' : ''].join(' ');
     // 消検日が日付で決まっている現場は、ピンの横に「消検 11/10」の札を付ける
-    const tag = s.dueExact ? `<span class="ptag">消検 ${+s.due.slice(5, 7)}/${+s.due.slice(8, 10)}</span>` : '';
+    // 消検が済んで建確が控えているときは「建確 11/20」
+    const md = v => `${+dPart(v).slice(5, 7)}/${+dPart(v).slice(8, 10)}`;
+    const tag = s.phase === '建確' ? `<span class="ptag b">建確 ${md(s.ex['建築確認検査日'])}</span>` : s.dueExact && s.days >= 0 ? `<span class="ptag">消検 ${md(s.due)}</span>` : '';
     const icon = L.divIcon({ className: 'pwrap', html: `<div class="${cls}" style="background:${COL[s.cat]}"></div>${tag}`, iconSize: [18, 18], iconAnchor: [9, 18] });
     const m = L.marker([s.lat, s.lng], { icon }).on('click', () => openSite(s['現場名']));
-    m.bindTooltip(s['現場名'], { direction: 'top', offset: [0, -16] });
+    m.bindTooltip(esc(s.alias || s['現場名']), { direction: 'top', offset: [0, -16] }); // 名前は必ずエスケープ（HTMLとして解釈させない）
     layer.addLayer(m); markers[s['現場名']] = m;
   });
   renderList();
 }
 let sortKey = 'due', sortAsc = true;
 function renderList() {
-  const order = ['赤', '黄', '青', '灰', '未定', '完成済'];
+  const order = ['赤', '黄', '青', '灰', '消検済', '未定', '完成済'];
+  const nameCell = s => s.alias ? `<b>${esc(s.alias)}</b><small class="sub">${esc(s['現場名'])}</small>` : `<b>${esc(s['現場名'])}</b>`;
+  const dayTxt = s => s.days == null ? '' : s.days < 0 ? (s.cat === '消検済' ? '消検済' : '完成') : (s.phase === '建確' ? `建確まで${s.days}` : s.days);
   let items = DATA.sitesX.filter(s => visible(s));
   const keyf = { due: s => [order.indexOf(s.cat), s.days ?? 9e9], name: s => s['現場名'], moto: s => [motoIdx(s['元請']), s.days ?? 9e9], last: s => s.visits[0]?.['日時'] || '', amount: s => [0, -(+s.amount || 0)] }[sortKey];
   items.sort((a, b) => { const x = keyf(a), y = keyf(b); const r = Array.isArray(x) ? (x[0] - y[0] || x[1] - y[1]) : String(x).localeCompare(String(y), 'ja'); return sortAsc ? r : -r; });
-  const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? '完成' : 'あと' + s.days + '日') : ''}` : '未定';
-  const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}${MEET && s.amount !== '' ? `<br>${yen(s.amount)}千円` : ''}</div></div>`).join('');
+  const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? dayTxt(s) : s.phase === '建確' ? `建確あと${s.days}日` : 'あと' + s.days + '日') : ''}` : '未定';
+  const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div>${nameCell(s)}<small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}${MEET && s.amount !== '' ? `<br>${yen(s.amount)}千円` : ''}</div></div>`).join('');
   const th = (k, t) => `<th data-k="${k}">${t}${sortKey === k ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>`;
-  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td><b>${esc(s['現場名'])}</b>${s['要確認'] ? ` <span style="color:var(--red)">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? fmtDT(s.ex['消検日']) : s.due.slice(0, 7).replace('-', '/') + '（月）') : '未定'}</td><td>${s.days != null ? (s.days < 0 ? '完成' : s.days) : ''}</td><td>${fmtDT(s.ex['建築確認検査日'])}</td><td class="fl">${FLAGS.filter(f => ['〇', '△'].includes(normF(s[f]))).map(f => f + (normF(s[f]) === '△' ? '△' : '')).join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td>${MEET ? `<td class="num">${yen(s.amount)}</td>` : ''}</tr>`).join('');
+  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td class="nm">${nameCell(s)}${s['要確認'] ? ` <span style="color:var(--red)" title="${esc(s['要確認'])}">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? esc(fmtDT(s.ex['消検日'])) : esc(s.due.slice(0, 7).replace('-', '/')) + '（月）') : '未定'}</td><td>${dayTxt(s)}</td><td>${esc(fmtDT(s.ex['建築確認検査日']))}</td><td class="fl">${FLAGS.filter(f => ['〇', '△'].includes(normF(s[f]))).map(f => f + (normF(s[f]) === '△' ? '△' : '')).join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td>${MEET ? `<td class="num">${yen(s.amount)}</td>` : ''}</tr>`).join('');
   // 電気屋（元請）ボタン。件数は元請以外の絞り込みを効かせた数
   const motoCount = {}, motoSum = {}; let motoAll = 0, sumAll = 0;
   DATA.sitesX.forEach(s => { if (!visible(s, true)) return; motoAll++; sumAll += +s.amount || 0; motoCount[s['元請']] = (motoCount[s['元請']] || 0) + 1; motoSum[s['元請']] = (motoSum[s['元請']] || 0) + (+s.amount || 0); });
@@ -340,11 +393,14 @@ function renderList() {
   const shown = items.reduce((a, s) => a + (+s.amount || 0), 0);
   const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}${sumTxt(sumAll)}</button>${Object.keys(motoCount).sort((a, b) => motoIdx(a) - motoIdx(b)).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}${sumTxt(motoSum[m])}</button>`).join('')}${MEET ? '<button id="printbtn" class="print">印刷</button>' : ''}</div>` +
     (MEET ? `<div class="sumline"><b>会議用</b>　${new Date().toLocaleDateString('ja-JP')} 現在　${motoF ? esc(motoF) : '全元請'}　${items.length}件　合計 <b>${yen(shown)}</b> 千円<span class="pnote">（会議用は残り日数・未定・完成済に関係なく全件）</span></div>` : '');
-  $('#listpage').innerHTML = motobar + (MEET ? monthTable() : '') + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
+  const imp = DATA.importedAt ? `<div class="impline">Excel取り込み：${esc(DATA.importedAt.slice(0, 16).replace('T', ' '))}${DATA.excelAt ? `（Excelの更新 ${esc(DATA.excelAt.slice(0, 16).replace('T', ' '))}）` : ''}　火・土の夜に複製し、翌朝取り込みます</div>` : '';
+  $('#listpage').innerHTML = motobar + imp + (MEET ? monthTable() : '') + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
     `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th>${MEET ? th('amount', '金額（千円）') : ''}</tr></thead><tbody>${rows}</tbody></table>`;
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
   $('#listpage').querySelectorAll('.motobar button[data-m]').forEach(el => el.onclick = () => { motoF = el.dataset.m; $('#moto').value = motoF; render(); });
   if ($('#printbtn')) $('#printbtn').onclick = () => window.print();
+  // 表の見出しを電気屋ボタンの帯の下に貼り付ける（帯に隠れないように）
+  const mb = $('#listpage .motobar'); $('#listpage').style.setProperty('--mb', (mb ? mb.offsetHeight : 0) + 'px');
   $('#listpage').querySelectorAll('th[data-k]').forEach(el => el.onclick = () => { if (sortKey === el.dataset.k) sortAsc = !sortAsc; else { sortKey = el.dataset.k; sortAsc = true; } renderList(); });
 }
 // 会議用：電気屋（元請）× 消検月 の金額（千円）。今年度4月〜3月。色チップや絞り込みに関係なく全物件で集計
@@ -371,6 +427,7 @@ function monthTable() {
     `<tr class="tot"><th>合計</th>${show.map(c => td(colSum[c], cnt['c|' + c])).join('')}${td(all, allN, 'tot')}</tr></tbody></table><div class="pnote" style="margin-top:4px">上段＝金額（千円）、下段＝件数（金額が入っている物件の数）</div></div>`;
 }
 function showTab(t) {
+  if (t === 'list') cancelPick();
   document.body.classList.toggle('list', t === 'list');
   document.querySelectorAll('.tabs span').forEach(x => x.classList.toggle('on', x.dataset.t === t));
   if (t === 'map') setTimeout(() => map.invalidateSize(), 50);
@@ -387,33 +444,40 @@ function gpsText() {
 }
 function openSite(name) {
   const s = DATA.sitesX.find(x => x['現場名'] === name); if (!s) return;
+  if (curSite !== name) flushFlags();
+  cancelPick();
   curSite = name;
-  $('#s_title').innerHTML = `${esc(s['現場名'])}<small>${esc(s['元請'])}${s['職人'] ? ' ／ ' + esc(s['職人']) : ''}</small>`;
+  $('#s_title').innerHTML = `${esc(s.alias || s['現場名'])}<small>${s.alias ? esc(s['現場名']) + ' ／ ' : ''}${esc(s['元請'])}${s['職人'] ? ' ／ ' + esc(s['職人']) : ''}</small>`;
   const ex = s.ex, flags = flagSpans(s);
-  const dueTxt = s.due ? (s.dueExact ? fmtDT(ex['消検日']) + '（消検日）' : s.due.slice(0, 7).replace('-', '/') + '（消検月）') : '未定';
+  const dueTxt = s.due ? (s.dueExact ? esc(fmtDT(ex['消検日'])) + '（消検日）' : esc(s.due.slice(0, 7).replace('-', '/')) + '（消検月）') : '未定';
+  // Googleマップ：座標があれば座標、なければ住所で探す。どちらも無ければ出さない
+  const gq = s.lat != null ? `${s.lat},${s.lng}` : (s['住所'] ? encodeURIComponent(s['住所']) : '');
+  const daysLabel = s.days == null || s.days < 0 ? '' : s.phase === '建確' ? `建確まで あと${s.days}日` : `あと${s.days}日`;
   // 写真は lh3 の直リンクで出す（drive.google.com の閲覧画面だとログインを求められる）
   const img = (id, w) => `https://lh3.googleusercontent.com/d/${encodeURIComponent(id)}=w${w}`;
-  const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' ? ` ／ ${v['距離m']}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}<button class="del" data-i="${i}">削除</button></div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="${img(id, 1600)}" target="_blank"><img src="${img(id, 200)}" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
+  const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' && v['距離m'] != null ? ` ／ ${esc(v['距離m'])}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}<button class="del" data-i="${i}">削除</button></div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="${img(id, 1600)}" target="_blank"><img src="${img(id, 200)}" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
   $('#s_body').innerHTML = `
-  <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${s.days != null ? (s.days < 0 ? '' : `あと${s.days}日`) : ''}</span><a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}">Googleマップ ›</a></div>
-    <div class="kv" style="margin-top:8px"><b>完成</b><span>${dueTxt}</span><b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${fireFor(s['住所']) ? `<b>所轄</b><span>${fireFor(s['住所']).name}（<a href="tel:${fireFor(s['住所']).tel}">${fireFor(s['住所']).tel}</a>）</span>` : ''}${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
+  <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${daysLabel}</span>${gq ? `<a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${gq}">Googleマップ ›</a>` : ''}</div>
+    <div class="kv" style="margin-top:8px"><b>消検</b><span>${dueTxt}</span>${ex['建築確認検査日'] ? `<b>建確</b><span>${esc(fmtDT(ex['建築確認検査日']))}</span>` : ''}<b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${fireFor(s['住所']) ? `<b>所轄</b><span>${fireFor(s['住所']).name}（<a href="tel:${fireFor(s['住所']).tel}">${fireFor(s['住所']).tel}</a>）</span>` : ''}${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
     <div class="flags" id="flags" style="margin-top:8px">${flags}</div><div class="gps" style="margin-top:3px">タップで 空→〇→／→△ と切り替わります（青枠＝アプリで変えたもの）</div></div>
   <div class="row" style="gap:6px">${s['手入力'] ? '<span class="tag">アプリで追加</span><button class="btn sub sm" id="x_edit">編集</button><button class="btn sub sm danger" id="x_del">削除</button>' : ''}<button class="btn sub sm" id="x_loc">${s.lat == null ? '位置を設定' : '位置を直す'}</button></div>
   <div class="sec"><h3>訪問を記録</h3>
     <div class="row"><label>建物の進捗</label><select class="f" id="v_stage"><option value="">選択</option>${STAGES.map(x => `<option>${x}</option>`).join('')}</select></div>
     <textarea id="v_memo" placeholder="メモ"></textarea>
-    <div class="row"><input type="file" id="v_photo" accept="image/*" multiple capture="environment" style="font-size:12px"></div>
+    <div class="row"><input type="file" id="v_photo" accept="image/*" multiple style="font-size:12px"></div>
     <div class="row" style="justify-content:space-between"><span class="gps" id="gps">${gpsText()}</span><button class="btn" id="v_send">記録する</button></div></div>
   <div class="sec"><h3>訪問履歴（${s.visits.length}件）</h3><div class="hist">${hist}</div></div>
   <div class="sec"><h3>物件情報（手入力）</h3>
-    <div class="row dt"><label>消検日</label><input type="date" id="e_fire" value="${dPart(ex['消検日'])}"><input type="time" id="e_fireT" value="${tPart(ex['消検日'])}"><button class="clr" data-c="e_fire">×</button></div>
-    <div class="row dt"><label>建築確認検査日</label><input type="date" id="e_bldg" value="${dPart(ex['建築確認検査日'])}"><input type="time" id="e_bldgT" value="${tPart(ex['建築確認検査日'])}"><button class="clr" data-c="e_bldg">×</button></div>
+    <label class="fl2">正式名称（物件名が決まったら）<input class="f" id="e_alias" value="${esc(s.alias)}" placeholder="例：〇〇マンション北2条"></label>
+    <div class="row dt"><label>消検日</label><input type="date" id="e_fire" value="${esc(dPart(ex['消検日']))}"><input type="time" id="e_fireT" value="${esc(tPart(ex['消検日']))}"><button class="clr" data-c="e_fire">×</button></div>
+    <div class="row dt"><label>建築確認検査日</label><input type="date" id="e_bldg" value="${esc(dPart(ex['建築確認検査日']))}"><input type="time" id="e_bldgT" value="${esc(tPart(ex['建築確認検査日']))}"><button class="clr" data-c="e_bldg">×</button></div>
     <div class="gps">時刻は分かるときだけ。×で日時を消して保存すると空欄に戻ります</div>
     <div class="row"><label><input type="checkbox" id="e_del" ${ex['搬入'] ? 'checked' : ''}> 搬入済</label></div>
     <textarea id="e_prog" placeholder="自社工事の進捗メモ（配線済・器具待ち など）">${esc(ex['工事進捗メモ'])}</textarea>
     <div class="row" style="justify-content:flex-end"><button class="btn sub" id="e_save">保存</button></div>
-    ${ex['更新日時'] ? `<div class="gps">最終更新 ${ex['更新日時'].slice(0, 16).replace('T', ' ')} ${esc(ex['更新者'])}</div>` : ''}</div>`;
+    ${ex['更新日時'] ? `<div class="gps">最終更新 ${esc(String(ex['更新日時']).slice(0, 16).replace('T', ' '))} ${esc(ex['更新者'])}</div>` : ''}</div>`;
   $('#sheet').classList.add('open');
+  extraInit = extraValues(); // 開いた時点の値。保存のときは変えた項目だけ送る
   $('#v_send').onclick = () => sendVisit(s);
   $('#x_loc').onclick = () => openForm('loc', s);
   bindFlags(s);
@@ -445,10 +509,31 @@ async function delVisit(s, v) {
   try { await post({ action: 'deleteVisit', site: s['現場名'], at: v['日時'], by: v['記録者'] }); toast('削除しました'); await load(true); }
   catch (e) { toast('削除失敗：' + e.message); }
 }
+// 物件情報の入力欄の今の値
+let extraInit = null;
+function extraValues() {
+  if (!$('#e_fire')) return null;
+  return { fire: $('#e_fire').value + ' ' + $('#e_fireT').value, bldg: $('#e_bldg').value + ' ' + $('#e_bldgT').value, del: $('#e_del').checked, prog: $('#e_prog').value.trim(), alias: $('#e_alias').value.trim() };
+}
+// 開いたときから変わった項目だけ（送信用）。入力欄が無ければ null
+function extraChanged() {
+  const now = extraValues(); if (!now || !extraInit) return null;
+  const b = {};
+  if (now.fire !== extraInit.fire) { b.fireDate = $('#e_fire').value; b.fireTime = $('#e_fireT').value; }
+  if (now.bldg !== extraInit.bldg) { b.bldgDate = $('#e_bldg').value; b.bldgTime = $('#e_bldgT').value; }
+  if (now.del !== extraInit.del) b.delivery = now.del ? '〇' : '';
+  if (now.prog !== extraInit.prog) b.progress = now.prog;
+  if (now.alias !== extraInit.alias) b.alias = now.alias;
+  return b;
+}
 async function saveExtra(s) {
+  const changed = extraChanged() || {};
+  if (!Object.keys(changed).length) return toast('変更はありません');
   const btn = $('#e_save'); btn.disabled = true;
   try {
-    await post({ action: 'extra', site: s['現場名'], fireDate: $('#e_fire').value, fireTime: $('#e_fireT').value, bldgDate: $('#e_bldg').value, bldgTime: $('#e_bldgT').value, delivery: $('#e_del').checked ? '〇' : '', progress: $('#e_prog').value.trim() });
+    // 変えた項目だけ送る（開きっぱなしの間に別の人が入れた値を、古い値で戻さない）
+    await post({ action: 'extra', site: s['現場名'], ...changed });
+    extraInit = extraValues();
     toast('保存しました'); await load(true);
   } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
 }
@@ -456,31 +541,43 @@ async function saveExtra(s) {
 const FLAG_CYCLE = ['', '〇', '／', '△'];
 function flagSpans(s) {
   const cls = { '〇': 'on', '／': 'na', '△': 'tri' };
-  return FLAGS.map(f => { const v = normF(s[f]); return `<span class="tap ${cls[v] || ''}${s['アプリ_' + f] ? ' app' : ''}" data-f="${f}">${f}${v}</span>`; }).join('') +
-    `<span class="${s.ex['搬入'] ? 'on' : ''}">搬入</span>`;
+  return FLAGS.map(f => { const v = normF(s[f]); return `<span class="tap ${cls[v] || ''}${s['アプリ_' + f] ? ' app' : ''}" data-f="${f}">${f}${esc(v)}</span>`; }).join('') +
+    `<span class="ro">${s.ex['搬入'] ? '搬入済' : '搬入まだ'}</span>`; // 搬入は下の「搬入済」で切り替える（ここは表示だけ）
 }
+// 送る待ちの切り替え（0.8秒まとめ）。パネルを閉じる・別の物件を開くときはすぐ送る
 const flagTimers = {};
+function flushFlags() { Object.keys(flagTimers).forEach(k => { const t = flagTimers[k]; delete flagTimers[k]; clearTimeout(t.id); t.fn(); }); }
 function bindFlags(s) {
   $('#flags').querySelectorAll('span.tap').forEach(el => el.onclick = () => {
     const f = el.dataset.f;
     if (!(('元_' + f) in s)) s['元_' + f] = String(s[f] || ''); // Excelの値（最初の1回だけ控える）
     const nx = FLAG_CYCLE[(FLAG_CYCLE.indexOf(normF(s[f])) + 1) % FLAG_CYCLE.length];
-    s[f] = nx; s['アプリ_' + f] = nx !== s['元_' + f] ? 1 : 0;
+    s[f] = nx; s['アプリ_' + f] = nx !== normF(s['元_' + f]) ? 1 : 0;
     // 元データ（DATA.sites）にも反映して、一覧や再描画で戻らないようにする
     const raw = DATA.sites.find(x => x['現場名'] === s['現場名']); if (raw) { raw[f] = nx; raw['元_' + f] = s['元_' + f]; raw['アプリ_' + f] = s['アプリ_' + f]; }
     $('#flags').innerHTML = flagSpans(s); bindFlags(s);
     // 続けてタップしても最後の値だけ送る
-    const key = s['現場名'] + '|' + f; clearTimeout(flagTimers[key]);
-    flagTimers[key] = setTimeout(() => post({ action: 'setFlag', site: s['現場名'], key: f, value: nx, base: s['元_' + f] })
+    const key = s['現場名'] + '|' + f;
+    if (flagTimers[key]) clearTimeout(flagTimers[key].id);
+    const fn = () => { delete flagTimers[key]; post({ action: 'setFlag', site: s['現場名'], key: f, value: nx, base: s['元_' + f] })
       .then(() => { saveCache(); toast(`${f}：${nx || '空欄'} を保存しました`); renderList(); })
-      .catch(e => toast('保存失敗：' + e.message)), 800);
+      .catch(e => toast(`${f} の保存に失敗：` + e.message)); };
+    flagTimers[key] = { id: setTimeout(fn, 800), fn };
   });
 }
 
 // ===== 物件の追加・編集・位置 =====
 // draft: 入力途中の内容。地図タップで位置を選ぶあいだ、フォームを閉じても残す
 let draft = null;
+// 「地図をタップして決める」の待ち受け。別の操作をしたら必ず解除する（残ると後で勝手にフォームが開く）
+let pickHandler = null;
+function cancelPick() {
+  if (pickHandler) { map.off('click', pickHandler); pickHandler = null; }
+  map.getContainer().style.cursor = '';
+  $('#pickbar').style.display = 'none';
+}
 function openForm(mode, s) {
+  flushFlags(); cancelPick();
   if (!draft || draft.mode !== mode || draft.site !== (s ? s['現場名'] : '')) {
     draft = { mode, site: s ? s['現場名'] : '', name: s ? s['現場名'] : '', moto: s ? s['元請'] : '', worker: s ? s['職人'] : '', ym: s && s['消検月'] ? String(s['消検月']).slice(0, 7) : '', note: s ? s['注意点'] : '', addr: s ? s['住所'] : '', lat: undefined, lng: undefined, how: '' };
   }
@@ -488,7 +585,7 @@ function openForm(mode, s) {
   curSite = null;
   // プルダウンの候補：元請・職人は今のデータから、消検月は今年度の4月から2年先まで
   const uniq = a => [...new Set(a.filter(Boolean))].sort((x, y) => x.localeCompare(y, 'ja'));
-  const motos = uniq(DATA.sitesX.map(x => x['元請']));
+  const motos = MOTO_ORDER.filter(m => m !== '（元請なし）'); // Excelのシート順
   const workers = uniq(DATA.sitesX.flatMap(x => String(x['職人'] || '').split(/[、,，・\s]+/)));
   const now = new Date(), y0 = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
   const months = []; for (let i = 0; i < 36; i++) { const d = new Date(y0, 3 + i, 1); if (d > new Date(now.getFullYear() + 2, now.getMonth(), 1)) break; months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); }
@@ -498,7 +595,7 @@ function openForm(mode, s) {
   $('#s_title').innerHTML = { add: '物件を追加', edit: '物件を編集', loc: '位置を直す' }[mode] + (mode !== 'add' ? `<small>${esc(d.site)}</small>` : '');
   $('#s_body').innerHTML = `<div class="sec">
     ${mode === 'add' ? `<label class="fl2">現場名（必須）<input class="f" id="f_name" value="${esc(d.name)}" placeholder="例：北2西22MS"></label>` : ''}
-    ${full ? `<label class="fl2">元請<select class="f" id="f_moto">${opts(motos, d.moto, '選んでください')}</select></label>
+    ${full ? `<label class="fl2">元請（必須）<select class="f" id="f_moto">${opts(motos, d.moto === '（元請なし）' ? '' : d.moto, '選んでください')}</select></label>
     <label class="fl2">職人<span class="row" style="flex-wrap:nowrap"><select class="f" id="f_w1">${opts(workers, w1, '選んでください')}</select><select class="f" id="f_w2">${opts(workers, w2, '（2人目なし）')}</select></span></label>
     <label class="fl2">消検月<select class="f" id="f_ym">${mopts(d.ym)}</select></label>
     <label class="fl2">注意点<textarea id="f_note">${esc(d.note)}</textarea></label>` : ''}
@@ -517,14 +614,22 @@ function openForm(mode, s) {
     d.lat = myPos.lat; d.lng = myPos.lng; d.how = '現在地'; openForm(mode, s);
   };
   $('#f_pick').onclick = () => {
-    keep(); showTab('map'); $('#sheet').classList.remove('open'); toast('地図をタップして位置を決めてください');
+    keep(); showTab('map'); $('#sheet').classList.remove('open');
+    cancelPick();
     map.getContainer().style.cursor = 'crosshair';
-    map.once('click', e => { map.getContainer().style.cursor = ''; d.lat = e.latlng.lat; d.lng = e.latlng.lng; d.how = '地図で指定'; openForm(mode, s); });
+    $('#pickbar').style.display = 'flex';
+    $('#pickcancel').onclick = () => { cancelPick(); openForm(mode, s); }; // やめたらフォームに戻る（入力は残る）
+    pickHandler = e => { cancelPick(); d.lat = e.latlng.lat; d.lng = e.latlng.lng; d.how = '地図で指定'; openForm(mode, s); };
+    map.on('click', pickHandler);
   };
   const clr = $('#f_clr'); if (clr) clr.onclick = e => { e.preventDefault(); keep(); d.lat = d.lng = undefined; openForm(mode, s); };
   $('#f_cancel').onclick = () => { draft = null; if (s) openSite(s['現場名']); else $('#sheet').classList.remove('open'); };
   $('#f_save').onclick = async () => {
-    keep(); const btn = $('#f_save'); btn.disabled = true;
+    keep();
+    if (full && !d.moto) return toast('元請を選んでください');
+    // 位置を直す：何も選ばず住所も変えていなければ送らない（手で決めた座標を住所の推定で上書きしない）
+    if (mode === 'loc' && d.lat == null && (d.addr || '') === (s && s['住所'] || '')) return toast('住所を変えるか、現在地・地図タップで位置を選んでください');
+    const btn = $('#f_save'); btn.disabled = true;
     try {
       const body = { site: d.site, name: d.name, moto: d.moto, worker: d.worker, ym: d.ym, note: d.note, addr: d.addr };
       if (d.lat != null) { body.lat = d.lat; body.lng = d.lng; }
@@ -543,6 +648,7 @@ async function delSite(s) {
   catch (e) { toast('削除失敗：' + e.message); }
 }
 $('#addsite').onclick = () => { draft = null; openForm('add', null); };
+$('#worker').onchange = e => { workerF = e.target.value; render(); };
 
 function shrink(file) {
   return new Promise(res => {
@@ -564,15 +670,22 @@ $('#moto').onchange = e => { motoF = e.target.value; render(); };
 $('#firechip').classList.toggle('on', fireOn);
 $('#firechip').onclick = e => { fireOn = !fireOn; e.target.classList.toggle('on', fireOn); if (fireOn) fireLayer.addTo(map); else map.removeLayer(fireLayer); store.set('fire', fireOn ? '1' : '0'); };
 $('#q').oninput = e => { q = e.target.value.trim(); render(); };
-$('#reload').onclick = () => load(true).then(ok => ok && toast('更新しました'));
-$('#s_close').onclick = () => { $('#sheet').classList.remove('open'); curSite = null; };
+$('#reload').onclick = () => load(true).then(r => r === 'ok' && toast('更新しました'));
+$('#s_close').onclick = () => { flushFlags(); cancelPick(); $('#sheet').classList.remove('open'); curSite = null; };
+// PCの詳細パネルはヘッダーの下から出す（ヘッダーの検索・＋物件・更新・👤 を隠さない）
+const setHH = () => document.documentElement.style.setProperty('--hh', $('header').offsetHeight + 'px');
+window.addEventListener('resize', setHH); setHH();
 
 // ===== ログイン =====
 (async function init() {
   const pw = store.get('pw'), user = store.get('user');
   // 記録者一覧は初回だけサーバから取る必要があるので、まずパスワードだけで試す
-  if (pw && user) { $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; if (await load(false)) locate(); else showLogin(); }
-  else showLogin();
+  if (pw && user) {
+    $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; setHH();
+    const r = await load(false);
+    // パスワードが違うときだけログイン画面。圏外などで通信できないときは前回のデータのまま使う
+    if (r === 'auth') showLogin(); else locate();
+  } else showLogin();
 })();
 // 記録者の名前は設定シートにあり、ログイン画面を開いたときにパスワードなしで取る
 async function fetchUsers() {
@@ -589,12 +702,13 @@ function fillUsers(list) {
   if (keep && list && list.includes(keep)) sel.value = keep;
 }
 function showLogin() {
+  pending = null; // 前に確かめた結果（古いデータ）を使い回さない
   $('#login').style.display = 'flex';
   const cached = store.get('users'); fillUsers(cached ? cached.split(',') : null);
   if (store.get('pw')) $('#l_pw').value = store.get('pw');
   fetchUsers();
 }
-let pending = null; // パスワード確認の結果（{pw, j}）
+var pending = null; // パスワード確認の結果（{pw, j}）。init より前に使うので var（let だと宣言前に触れてエラー）
 async function checkPw() {
   const pw = $('#l_pw').value; if (!pw) return null;
   if (pending && pending.pw === pw) return pending.j;
@@ -610,8 +724,8 @@ $('#loginf').onsubmit = async e => {
     const j = await checkPw(); if (!j) return;
     const user = $('#l_user').value;
     if (!user) { $('#l_msg').textContent = '記録者を選んでください'; return; }
-    store.set('pw', $('#l_pw').value); store.set('user', user); DATA = j; saveCache();
-    $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; build(); locate();
+    store.set('pw', $('#l_pw').value); store.set('user', user); DATA = j; pending = null; saveCache();
+    $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; build(); setHH(); locate();
   } catch (err) { $('#l_msg').textContent = '通信エラー'; }
 };
 $('#who').onclick = () => showLogin();

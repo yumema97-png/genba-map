@@ -23,7 +23,8 @@ const SHEETS = {
   config: '設定',
 };
 const SITE_COLS = ['現場名', '元請', '職人', '消検月', '図面', 'ELV', '見積', '受注', '発注', '着工', '設置', '下検査', '注意点', '住所', '緯度', '経度', '要確認', '取込日時'];
-const EXTRA_COLS = ['現場名', '消検日', '建築確認検査日', '搬入', '工事進捗メモ', '更新日時', '更新者'];
+// 正式名称：現場名（Excelの略称）はそのまま鍵に使い、確定した物件名を別に持つ（2026-11-09 追加）
+const EXTRA_COLS = ['現場名', '消検日', '建築確認検査日', '搬入', '工事進捗メモ', '更新日時', '更新者', '正式名称'];
 const VISIT_COLS = ['日時', '記録者', '現場名', '建物進捗', 'メモ', '写真', '緯度', '経度', '距離m'];
 // アプリで追加した物件。Excel取り込みは触らない。同じ現場名がExcelに載ったらExcel側を出す
 const MANUAL_SHEET = '物件手入力';
@@ -114,6 +115,9 @@ function doGet(e) {
     users: cfg('記録者').split(',').map(s => s.trim()).filter(Boolean),
     radius: Number(cfg('現地判定m')) || 300,
     updated: new Date().toISOString(),
+    // 画面上部に出す「Excel取り込み」日時と、そのときのExcelの更新日時
+    importedAt: PropertiesService.getScriptProperties().getProperty('importedAt') || '',
+    excelAt: PropertiesService.getScriptProperties().getProperty('excelAt') || '',
   });
 }
 
@@ -121,8 +125,10 @@ function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json({ ok: false, error: 'bad json' }); }
   if (!roleOf(body.pw)) return json({ ok: false, error: 'パスワードが違います' });
+  // 写真のドライブ保存は時間がかかるので、ロックを取る前に済ませる（他の人の保存を待たせない）
+  if (body.action === 'visit') body.photoIds = (body.photos || []).map((p, i) => savePhoto(body.site, p, i)).filter(Boolean);
   const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  if (!lock.tryLock(20000)) return json({ ok: false, error: '混み合っています。少し待ってもう一度押してください' });
   try {
     if (body.action === 'visit') return json(addVisit(body));
     if (body.action === 'extra') return json(saveExtra(body));
@@ -186,17 +192,21 @@ function flagSheet() {
 function setFlag(b) {
   if (FLAG_KEYS.indexOf(b.key) < 0 || FLAG_VALUES.indexOf(b.value) < 0) return { ok: false, error: '項目か値が不正です' };
   const sh = flagSheet(), v = sh.getDataRange().getValues();
-  const row = [b.site, b.key, b.value, String(b.base || ''), new Date(), b.user || ''];
+  const base = String(b.base || '');
+  const same = b.value === normCircle(base); // Excelの ○（U+25CB）は 〇 と同じ扱い
+  const row = [txt(b.site), b.key, txt(b.value), txt(base), new Date(), txt(b.user)];
   for (let i = 1; i < v.length; i++) {
     if (v[i][0] === b.site && v[i][1] === b.key) {
-      if (b.value === String(b.base || '')) sh.deleteRow(i + 1); // Excelと同じ値に戻したら記録は要らない
+      if (same) sh.deleteRow(i + 1); // Excelと同じ値に戻したら記録は要らない
       else sh.getRange(i + 1, 1, 1, row.length).setValues([row]);
       return { ok: true };
     }
   }
-  if (b.value !== String(b.base || '')) sh.appendRow(row);
+  if (!same) sh.appendRow(row);
   return { ok: true };
 }
+
+function normCircle(v) { return v === '○' ? '〇' : String(v || ''); }
 
 // 取り込み後、Excel側で変わった項目のアプリ記録を消す（古い記録が後で生き返らないように）
 function pruneFlags_() {
@@ -216,6 +226,14 @@ function findRow(sh, name) {
 
 function clean(s) { return String(s == null ? '' : s).trim(); }
 
+// 人が入力した文字をシートに書くとき用。先頭に ' を付けて「文字」として置く。
+// こうしないと「=…」が数式として動き（他のシートの中身を読めてしまう）、「11/10」「1-2」は日付に化ける。
+// 読み返すと ' は付かない（getValues は中身だけ返す）
+function txt(s) {
+  const v = clean(s);
+  return v === '' ? '' : "'" + v;
+}
+
 // 住所だけで緯度経度が無ければ座標を取る
 function locate_(addr, lat, lng) {
   if (lat !== '' && lat != null && lng !== '' && lng != null) return { lat: Number(lat), lng: Number(lng) };
@@ -230,7 +248,7 @@ function addSite(b) {
   if (findRow(SpreadsheetApp.getActive().getSheetByName(SHEETS.sites), name) || findRow(manualSheet(), name)) return { ok: false, error: '同じ現場名がすでにあります' };
   const addr = clean(b.addr) || nameToAddress(name);
   const p = locate_(addr, b.lat, b.lng);
-  manualSheet().appendRow([name, clean(b.moto), clean(b.worker), clean(b.ym), clean(b.note), addr, p.lat, p.lng, new Date(), b.user || '', '', '']);
+  manualSheet().appendRow([txt(name), txt(b.moto), txt(b.worker), txt(b.ym), txt(b.note), txt(addr), p.lat, p.lng, new Date(), txt(b.user), '', '']);
   return { ok: true, name, lat: p.lat, lng: p.lng, addr };
 }
 
@@ -241,8 +259,8 @@ function updateSite(b) {
   const addr = clean(b.addr);
   const moved = addr !== String(cur[5]) || b.lat !== undefined;
   const p = moved ? locate_(addr, b.lat, b.lng) : { lat: cur[6], lng: cur[7] };
-  sh.getRange(r, 2, 1, 7).setValues([[clean(b.moto), clean(b.worker), clean(b.ym), clean(b.note), addr, p.lat, p.lng]]);
-  sh.getRange(r, 11, 1, 2).setValues([[new Date(), b.user || '']]);
+  sh.getRange(r, 2, 1, 7).setValues([[txt(b.moto), txt(b.worker), txt(b.ym), txt(b.note), txt(addr), p.lat, p.lng]]);
+  sh.getRange(r, 11, 1, 2).setValues([[new Date(), txt(b.user)]]);
   return { ok: true, lat: p.lat, lng: p.lng };
 }
 
@@ -262,20 +280,20 @@ function setLocation(b) {
   let sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.sites), r = findRow(sh, b.site);
   if (r) {
     const c = n => SITE_COLS.indexOf(n) + 1;
-    sh.getRange(r, c('住所')).setValue(addr);
+    sh.getRange(r, c('住所')).setValue(txt(addr));
     sh.getRange(r, c('緯度'), 1, 3).setValues([[p.lat, p.lng, '']]); // 緯度・経度・要確認
     return { ok: true, lat: p.lat, lng: p.lng };
   }
   sh = manualSheet(); r = findRow(sh, b.site);
   if (!r) return { ok: false, error: '物件が見つかりません' };
-  sh.getRange(r, 6, 1, 3).setValues([[addr, p.lat, p.lng]]);
+  sh.getRange(r, 6, 1, 3).setValues([[txt(addr), p.lat, p.lng]]);
   return { ok: true, lat: p.lat, lng: p.lng };
 }
 
 function addVisit(b) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.visits);
-  const urls = (b.photos || []).map((p, i) => savePhoto(b.site, p, i)).filter(Boolean);
-  const row = [new Date(), b.user || '', b.site, b.stage || '', b.memo || '', urls.join('\n'), b.lat || '', b.lng || '', b.dist === undefined ? '' : Math.round(b.dist)];
+  const urls = b.photoIds || []; // doPost でロックの前に保存済み
+  const row = [new Date(), txt(b.user), txt(b.site), txt(b.stage), txt(b.memo), urls.join('\n'), b.lat || '', b.lng || '', b.dist === undefined || b.dist === null ? '' : Math.round(b.dist)];
   sh.appendRow(row);
   return { ok: true, photos: urls };
 }
@@ -302,17 +320,25 @@ function dateTime(d, t) {
   return d.replace(/-/g, '/') + (t ? ' ' + t : '');
 }
 
+// 送られてきた項目だけ書き換える（送られていない項目は今の値のまま）。
+// 画面を開きっぱなしの人が保存しても、その間に別の人が入れた値を古い値で戻さないため
 function saveExtra(b) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.extra);
-  const data = sh.getDataRange().getValues();
-  const row = [b.site, dateTime(b.fireDate, b.fireTime), dateTime(b.bldgDate, b.bldgTime), b.delivery || '', b.progress || '', new Date(), b.user || ''];
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === b.site) {
-      sh.getRange(i + 1, 1, 1, row.length).setValues([row]);
-      return { ok: true };
-    }
-  }
-  sh.appendRow(row);
+  // 列が増えたとき（正式名称）は見出しを足す
+  if (sh.getLastColumn() < EXTRA_COLS.length) sh.getRange(1, 1, 1, EXTRA_COLS.length).setValues([EXTRA_COLS]).setFontWeight('bold');
+  const data = sh.getRange(1, 1, Math.max(sh.getLastRow(), 1), EXTRA_COLS.length).getValues();
+  let r = 0;
+  for (let i = 1; i < data.length; i++) if (data[i][0] === b.site) { r = i + 1; break; }
+  // 今の行（無ければ空）。日時は Date のまま、文字は ' を付け直して書く（数式・日付化を防ぐ）
+  const old = r ? data[r - 1] : [b.site, '', '', '', '', '', '', ''];
+  const cur = [txt(old[0]), old[1], old[2], txt(old[3]), txt(old[4]), new Date(), txt(b.user), txt(old[7])];
+  if (b.fireDate !== undefined) cur[1] = dateTime(b.fireDate, b.fireTime);
+  if (b.bldgDate !== undefined) cur[2] = dateTime(b.bldgDate, b.bldgTime);
+  if (b.delivery !== undefined) cur[3] = txt(b.delivery);
+  if (b.progress !== undefined) cur[4] = txt(b.progress);
+  if (b.alias !== undefined) cur[7] = txt(b.alias);
+  if (r) sh.getRange(r, 1, 1, cur.length).setValues([cur]);
+  else sh.appendRow(cur);
   return { ok: true };
 }
 
@@ -361,21 +387,36 @@ function json(obj) {
 // 毎朝トリガーで呼ぶ。ドライブのExcelが前回取り込み後に更新されていたときだけ取り込む。
 // Excelはパソコンのタスク「現場マップExcel複製」が火曜・土曜の夜にサーバーから複製している。
 function importIfChanged() {
-  const it = DriveApp.getFilesByName(cfg('Excelファイル名'));
-  if (!it.hasNext()) throw new Error('Excelが見つかりません: ' + cfg('Excelファイル名'));
-  const updated = it.next().getLastUpdated().getTime();
+  const xlsx = excelFile_();
+  const updated = xlsx.getLastUpdated().getTime();
   const props = PropertiesService.getScriptProperties();
   if (Number(props.getProperty('excelUpdated') || 0) >= updated) return '変更なし';
-  const n = importFromExcel();
+  const n = importFromExcel(xlsx);
   props.setProperty('excelUpdated', String(updated));
   return n + '件取り込み';
 }
 
-function importFromExcel() {
+// 取り込むExcelを1つに決める。同じ名前のファイルが複数あっても、ゴミ箱のものは除き、
+// 「現場マップ」フォルダにあるものを優先、その中で更新日時がいちばん新しいものを使う
+function excelFile_() {
   const fname = cfg('Excelファイル名');
   const it = DriveApp.getFilesByName(fname);
-  if (!it.hasNext()) throw new Error('Excelが見つかりません: ' + fname);
-  const xlsx = it.next();
+  let best = null, bestScore = -1;
+  while (it.hasNext()) {
+    const f = it.next();
+    if (f.isTrashed()) continue;
+    let inFolder = false;
+    const ps = f.getParents();
+    while (ps.hasNext()) if (ps.next().getName() === '現場マップ') inFolder = true;
+    const score = (inFolder ? 1e15 : 0) + f.getLastUpdated().getTime();
+    if (score > bestScore) { best = f; bestScore = score; }
+  }
+  if (!best) throw new Error('Excelが見つかりません: ' + fname);
+  return best;
+}
+
+function importFromExcel(file) {
+  const xlsx = file && file.getBlob ? file : excelFile_(); // エディタやトリガーから呼ぶと file は無い／イベントになる
   // xlsx → 一時スプレッドシートに変換（Drive API 必要）
   const tmp = Drive.Files.create(
     { name: '_tmp_import_' + Date.now(), mimeType: 'application/vnd.google-apps.spreadsheet' },
@@ -389,47 +430,81 @@ function importFromExcel() {
   readSheet(MANUAL_SHEET).forEach(r => (old[r['現場名']] = { '住所': r['住所'], '緯度': r['緯度'], '経度': r['経度'] }));
   readSheet(SHEETS.sites).forEach(r => (old[r['現場名']] = r));
 
-  const rows = [], amts = [];
+  const rows = [], amts = [], seen = {};
   const now = new Date();
-  ss.getSheets().forEach(sh => {
-    if (!/^R\d+年度_/.test(sh.getName())) return;
-    const moto = sh.getName().replace(/^R\d+年度_/, '');
-    const v = sh.getDataRange().getValues();
-    // 8行目以降: B=項番 C=現場名 D=職人 E=消検月 F..M=○ N=金額 O=注意点 P=消検年月(日付)
-    const baseYear = Number(v[1][17]) || now.getFullYear(); // R2 = 集計基準年
-    for (let i = 7; i < v.length; i++) {
-      const r = v[i];
-      const name = norm(r[2]);
-      if (!name) continue;
-      let ym = '';
-      if (r[15] instanceof Date) ym = Utilities.formatDate(r[15], 'Asia/Tokyo', 'yyyy-MM');
-      else if (r[4] !== '' && !isNaN(r[4])) {
-        const m = Number(r[4]);
-        ym = `${m >= 4 ? baseYear : baseYear + 1}-${String(m).padStart(2, '0')}`;
+  const fy = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear(); // 今年度（4月始まり）
+  const C = n => SITE_COLS.indexOf(n);
+  try {
+    ss.getSheets().forEach(sh => {
+      if (!/^R\d+年度_/.test(sh.getName())) return;
+      const moto = sh.getName().replace(/^R\d+年度_/, '');
+      const v = sh.getDataRange().getValues();
+      if (v.length < 8) return; // 物件行が無いシート
+      // 8行目以降: B=項番 C=現場名 D=職人 E=消検月 F..M=○ N=金額 O=注意点 P=消検年月(日付)
+      const baseYear = Number((v[1] || [])[17]) || fy; // R2 = 集計基準年
+      for (let i = 7; i < v.length; i++) {
+        const r = v[i];
+        let name = norm(r[2]);
+        if (!name) continue;
+        // 同じ現場名が別の元請シートにもあると、記録や消検日が混ざる。2つ目以降は「名前（元請）」にして分ける
+        let dup = '';
+        if (seen[name]) { name = `${name}（${moto}）`; dup = '同名あり（Excelで名前を分けてください）'; }
+        seen[name] = 1;
+        let ym = '';
+        if (r[15] instanceof Date) ym = Utilities.formatDate(r[15], 'Asia/Tokyo', 'yyyy-MM');
+        else if (r[4] !== '' && !isNaN(r[4])) {
+          const m = Number(r[4]);
+          ym = `${m >= 4 ? baseYear : baseYear + 1}-${String(m).padStart(2, '0')}`;
+        }
+        const prev = old[name] || {};
+        let lat = prev['緯度'] || '', lng = prev['経度'] || '';
+        // 地図で位置を決めた物件（住所は空）に、推定住所を勝手に入れない
+        let addr = lat !== '' ? String(prev['住所'] || '') : (prev['住所'] || nameToAddress(name) || '');
+        if ((lat === '' || lng === '') && addr) {
+          const g = geocode(addr);
+          if (g) { lat = g.lat; lng = g.lng; }
+        }
+        // 要確認は毎回作り直す（座標が取れたら ⚠ を消す）
+        const chk = dup || (lat !== '' ? '' : addr ? '座標取得失敗' : '住所不明');
+        amts.push([txt(name), typeof r[13] === 'number' ? r[13] : '', now]); // N列 金額（千円）
+        rows.push([txt(name), txt(moto), txt(r[3]), ym, txt(r[5]), txt(r[6]), txt(r[7]), txt(r[8]), txt(r[9]), txt(r[10]), txt(r[11]), txt(r[12]), txt(r[14]), txt(addr), lat, lng, chk, now]);
       }
-      const prev = old[name] || {};
-      let addr = prev['住所'] || nameToAddress(name) || '';
-      let lat = prev['緯度'] || '', lng = prev['経度'] || '', chk = prev['要確認'] || '';
-      if ((lat === '' || lng === '') && addr) {
-        const g = geocode(addr);
-        if (g) { lat = g.lat; lng = g.lng; } else chk = '座標取得失敗';
-      }
-      if (!addr) chk = '住所不明';
-      amts.push([name, typeof r[13] === 'number' ? r[13] : '', now]); // N列 金額（千円）
-      rows.push([name, moto, r[3] || '', ym, r[5] || '', r[6] || '', r[7] || '', r[8] || '', r[9] || '', r[10] || '', r[11] || '', r[12] || '', r[14] || '', addr, lat, lng, chk, now]);
-    }
-  });
-  DriveApp.getFileById(tmp.id).setTrashed(true);
+    });
+  } finally {
+    DriveApp.getFileById(tmp.id).setTrashed(true);
+  }
   if (rows.length === 0) throw new Error('物件行が0件でした');
-  sitesSh.clearContents();
-  // 消検月 "2026-11" を日付に化けさせない（文字列のまま置く）
-  sitesSh.getRange(2, SITE_COLS.indexOf('消検月') + 1, Math.max(rows.length, 1), 1).setNumberFormat('@');
-  sitesSh.getRange(1, 1, 1, SITE_COLS.length).setValues([SITE_COLS]).setFontWeight('bold');
-  sitesSh.getRange(2, 1, rows.length, SITE_COLS.length).setValues(rows);
-  const amSh = SpreadsheetApp.getActive().getSheetByName(AMOUNT_SHEET_());
-  amSh.getRange(2, 1, Math.max(amSh.getLastRow() - 1, 1), AMOUNT_COLS.length).clearContent();
-  amSh.getRange(2, 1, amts.length, AMOUNT_COLS.length).setValues(amts);
-  pruneFlags_();
+
+  // ここから書き込み。アプリからの保存（位置を直す等）とぶつからないようロックを取る
+  const lock = LockService.getScriptLock();
+  lock.waitLock(60000);
+  try {
+    // 読み込みの間に「位置を直す」で変わった座標があれば、そちらを使う
+    const nowSites = {}; readSheet(SHEETS.sites).forEach(s => (nowSites[s['現場名']] = s));
+    rows.forEach(row => {
+      const name = String(row[0]).replace(/^'/, ''), cur = nowSites[name], prev = old[name] || {};
+      if (cur && cur['緯度'] !== '' && String(cur['緯度']) !== String(prev['緯度'] || '')) {
+        row[C('住所')] = txt(cur['住所']); row[C('緯度')] = cur['緯度']; row[C('経度')] = cur['経度'];
+        if (!String(row[C('要確認')]).startsWith('同名')) row[C('要確認')] = '';
+      }
+    });
+    // 消検月 "2026-11" を日付に化けさせない（文字列のまま置く）
+    sitesSh.getRange(2, C('消検月') + 1, rows.length, 1).setNumberFormat('@');
+    sitesSh.getRange(1, 1, 1, SITE_COLS.length).setValues([SITE_COLS]).setFontWeight('bold');
+    // 先に上書きしてから余った行だけ消す（途中で「0件」の瞬間を作らない）
+    sitesSh.getRange(2, 1, rows.length, SITE_COLS.length).setValues(rows);
+    const extraRows = sitesSh.getLastRow() - 1 - rows.length;
+    if (extraRows > 0) sitesSh.getRange(rows.length + 2, 1, extraRows, sitesSh.getLastColumn()).clearContent();
+    const amSh = SpreadsheetApp.getActive().getSheetByName(AMOUNT_SHEET_());
+    amSh.getRange(2, 1, amts.length, AMOUNT_COLS.length).setValues(amts);
+    const extraAm = amSh.getLastRow() - 1 - amts.length;
+    if (extraAm > 0) amSh.getRange(amts.length + 2, 1, extraAm, AMOUNT_COLS.length).clearContent();
+    pruneFlags_();
+    const fmt = d => Utilities.formatDate(d, 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss");
+    PropertiesService.getScriptProperties().setProperties({ importedAt: fmt(now), excelAt: fmt(xlsx.getLastUpdated()) });
+  } finally {
+    lock.releaseLock();
+  }
   return rows.length;
 }
 
