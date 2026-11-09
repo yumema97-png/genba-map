@@ -39,6 +39,11 @@ const AMOUNT_SHEET = '金額';
 const AMOUNT_COLS = ['現場名', '金額（千円）', '取込日時'];
 const MANUAL_COLS = ['現場名', '元請', '職人', '消検月', '注意点', '住所', '緯度', '経度', '登録日時', '登録者', '更新日時', '更新者'];
 const PHOTO_FOLDER = '現場写真';
+// 図面PDF：ドライブ「仕事用/現場マップ/図面/<現場名>/」に置く。共有設定は変えない（アプリのパスワードを通してだけ開ける）
+// 消防検査から30日たったら自動でゴミ箱へ（ゴミ箱でさらに30日は戻せる）
+const DRAW_SHEET = '図面';
+const DRAW_COLS = ['現場名', 'ファイル名', 'ファイルID', 'サイズKB', '登録日時', '登録者'];
+const DRAW_KEEP_DAYS = 30;
 
 // ---------- 初期化 ----------
 function setup() {
@@ -112,6 +117,7 @@ function doGet(e) {
     sites: allSites(),
     extra: readSheet(SHEETS.extra),
     visits: readSheet(SHEETS.visits),
+    drawings: readSheet(drawSheet_().getName()),
     users: cfg('記録者').split(',').map(s => s.trim()).filter(Boolean),
     radius: Number(cfg('現地判定m')) || 300,
     updated: new Date().toISOString(),
@@ -125,8 +131,11 @@ function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json({ ok: false, error: 'bad json' }); }
   if (!roleOf(body.pw)) return json({ ok: false, error: 'パスワードが違います' });
-  // 写真のドライブ保存は時間がかかるので、ロックを取る前に済ませる（他の人の保存を待たせない）
+  // 図面を開く（読むだけなのでロック不要）
+  if (body.action === 'getDrawing') return json(getDrawing(body));
+  // 写真・図面のドライブ保存は時間がかかるので、ロックを取る前に済ませる（他の人の保存を待たせない）
   if (body.action === 'visit') body.photoIds = (body.photos || []).map((p, i) => savePhoto(body.site, p, i)).filter(Boolean);
+  if (body.action === 'addDrawing') { try { body.file = saveDrawingFile_(body); } catch (err) { return json({ ok: false, error: '図面を保存できませんでした：' + err.message }); } }
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) return json({ ok: false, error: '混み合っています。少し待ってもう一度押してください' });
   try {
@@ -138,6 +147,8 @@ function doPost(e) {
     if (body.action === 'deleteSite') return json(deleteSite(body));
     if (body.action === 'setLocation') return json(setLocation(body));
     if (body.action === 'setFlag') return json(setFlag(body));
+    if (body.action === 'addDrawing') return json(addDrawingRow_(body));
+    if (body.action === 'deleteDrawing') return json(deleteDrawing(body));
     return json({ ok: false, error: 'unknown action' });
   } finally {
     lock.releaseLock();
@@ -342,11 +353,111 @@ function saveExtra(b) {
   return { ok: true };
 }
 
+// ---------- 置き場所（ドライブ直下を散らかさない） ----------
+// 「仕事用/現場マップ」フォルダ。見つけたIDは覚えておく
+function appFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('appFolderId');
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  let found = null;
+  const it = DriveApp.getFoldersByName('現場マップ');
+  while (it.hasNext()) {
+    const f = it.next(); if (f.isTrashed()) continue;
+    const ps = f.getParents(); let underWork = false;
+    while (ps.hasNext()) if (ps.next().getName() === '仕事用') underWork = true;
+    if (underWork || !found) found = f;
+    if (underWork) break;
+  }
+  if (!found) found = DriveApp.createFolder('現場マップ');
+  props.setProperty('appFolderId', found.getId());
+  return found;
+}
+function subFolder_(parent, name) {
+  const it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
+// ---------- 図面PDF ----------
+function drawSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(DRAW_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(DRAW_SHEET);
+    sh.getRange(1, 1, 1, DRAW_COLS.length).setValues([DRAW_COLS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+// ファイルの保存（ロックの外）。data は base64（"data:…;base64," 付きでも可）
+function saveDrawingFile_(b) {
+  const name = clean(b.name).replace(/[\\/:*?"<>|]/g, '_') || '図面.pdf';
+  if (!/\.pdf$/i.test(name)) throw new Error('PDFだけ保存できます');
+  const data = String(b.data || '').replace(/^data:[^,]*,/, '');
+  const bytes = Utilities.base64Decode(data);
+  if (bytes.length > 30 * 1024 * 1024) throw new Error('30MBまでです');
+  const folder = subFolder_(subFolder_(appFolder_(), '図面'), clean(b.site).replace(/[\\/:*?"<>|]/g, '_'));
+  const file = folder.createFile(Utilities.newBlob(bytes, 'application/pdf', name));
+  return { id: file.getId(), name, kb: Math.round(bytes.length / 1024) };
+}
+function addDrawingRow_(b) {
+  drawSheet_().appendRow([txt(b.site), txt(b.file.name), b.file.id, b.file.kb, new Date(), txt(b.user)]);
+  return { ok: true, id: b.file.id };
+}
+// 図面を返す（base64）。シートに載っているIDだけ（ドライブの他のファイルは読ませない）
+function getDrawing(b) {
+  const v = drawSheet_().getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) {
+    if (v[i][2] === b.id) {
+      const blob = DriveApp.getFileById(b.id).getBlob();
+      return { ok: true, name: v[i][1], data: Utilities.base64Encode(blob.getBytes()) };
+    }
+  }
+  return { ok: false, error: '図面が見つかりません（削除済みかもしれません）' };
+}
+function deleteDrawing(b) {
+  const sh = drawSheet_(), v = sh.getDataRange().getValues();
+  for (let i = v.length - 1; i >= 1; i--) {
+    if (v[i][2] === b.id) {
+      try { DriveApp.getFileById(b.id).setTrashed(true); } catch (e) {}
+      sh.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: '図面が見つかりません' };
+}
+// 消防検査から DRAW_KEEP_DAYS 日たった図面をゴミ箱へ。消検日（物件追加）、なければ消検月の月末で数える。
+// 毎朝の importIfChanged から呼ぶ
+function cleanupDrawings_() {
+  const sh = drawSheet_(), v = sh.getDataRange().getValues();
+  if (v.length < 2) return 0;
+  const fire = {};
+  readSheet(SHEETS.sites).concat(readSheet(MANUAL_SHEET)).forEach(s => {
+    const ym = String(s['消検月'] || '');
+    if (/^\d{4}-\d{2}/.test(ym)) fire[s['現場名']] = new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0); // 月末
+  });
+  readSheet(SHEETS.extra).forEach(e => { if (e['消検日']) fire[e['現場名']] = new Date(String(e['消検日']).slice(0, 10).replace(/-/g, '/')); });
+  const limit = new Date(); limit.setDate(limit.getDate() - DRAW_KEEP_DAYS);
+  let n = 0;
+  for (let i = v.length - 1; i >= 1; i--) {
+    const d = fire[v[i][0]], added = v[i][4] instanceof Date ? v[i][4] : new Date(0);
+    // 消検から30日、かつ登録から30日（消検後に入れた図面をすぐ消さない）
+    if (d && d < limit && added < limit) {
+      try {
+        const f = DriveApp.getFileById(v[i][2]); const ps = f.getParents(); f.setTrashed(true);
+        // 物件のフォルダが空になったらフォルダもゴミ箱へ
+        while (ps.hasNext()) { const p = ps.next(); if (p.getName() !== '図面' && !p.getFiles().hasNext() && !p.getFolders().hasNext()) p.setTrashed(true); }
+      } catch (e) {}
+      sh.deleteRow(i + 1); n++;
+    }
+  }
+  return n;
+}
+
 function savePhoto(site, dataUrl, idx) {
   try {
     const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl);
     if (!m) return '';
-    const folder = getFolder(PHOTO_FOLDER);
+    const folder = subFolder_(appFolder_(), PHOTO_FOLDER); // 仕事用/現場マップ/現場写真
     const ext = m[1].split('/')[1].replace('jpeg', 'jpg');
     const name = `${site}_${Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd_HHmmss')}_${idx + 1}.${ext}`;
     const blob = Utilities.newBlob(Utilities.base64Decode(m[2]), m[1], name);
@@ -387,6 +498,7 @@ function json(obj) {
 // 毎朝トリガーで呼ぶ。ドライブのExcelが前回取り込み後に更新されていたときだけ取り込む。
 // Excelはパソコンのタスク「現場マップExcel複製」が火曜・土曜の夜にサーバーから複製している。
 function importIfChanged() {
+  try { cleanupDrawings_(); } catch (e) { console.error('図面の整理に失敗: ' + e.message); } // 古い図面の整理（毎朝）
   const xlsx = excelFile_();
   const updated = xlsx.getLastUpdated().getTime();
   const props = PropertiesService.getScriptProperties();
