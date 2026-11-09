@@ -54,6 +54,7 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .motobar{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}
 .motobar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
 .motobar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+body.meet header .chip[data-c],body.meet #unvisited{display:none}
 .motobar button.print{margin-left:auto;background:var(--blu);color:#fff;border-color:var(--blu)}
 .sumline{padding:6px 14px;font-size:13px;border-bottom:1px solid var(--line);background:#fffbea}
 .sumline .pnote{color:var(--muted);font-size:11px;margin-left:8px}
@@ -235,6 +236,8 @@ function dist(a, b) { const R = 6371000, toR = x => x * Math.PI / 180; const dLa
 // 端末に残すキャッシュには金額を入れない（会議用PC以外に残らないように）
 const saveCache = () => { const { amounts, role, ...rest } = DATA; store.set('cache', JSON.stringify(rest)); };
 let MEET = false; // 会議用パスワードで入ったとき true（金額を出す）
+let MOTO_ORDER = [];
+const motoIdx = m => { const i = MOTO_ORDER.indexOf(m); return i < 0 ? 999 : i; };
 const yen = v => v === '' || v == null ? '' : Number(v).toLocaleString('ja-JP');
 async function load(force) {
   const pw = store.get('pw');
@@ -266,7 +269,8 @@ function build() {
     motos.add(s['元請']);
     return { ...s, amount: am[s['現場名']] ?? '', ex, due, dueExact: !!ex['消検日'], cat, days, visits: visits[s['現場名']] || [], lat: +s['緯度'] || null, lng: +s['経度'] || null };
   });
-  const sel = $('#moto'); const cur = sel.value; sel.innerHTML = '<option value="">元請：全部</option>' + [...motos].map(m => `<option>${esc(m)}</option>`).join(''); sel.value = cur;
+  MOTO_ORDER = [...motos].filter(Boolean); // 物件シートの並び＝Excelのシートの順（アプリで追加した物件の新しい元請は最後）
+  const sel = $('#moto'); const cur = sel.value; sel.innerHTML = '<option value="">元請：全部</option>' + MOTO_ORDER.map(m => `<option>${esc(m)}</option>`).join(''); sel.value = cur;
   document.querySelectorAll('.chip[data-c]').forEach(ch => ch.querySelector('b').textContent = DATA.sitesX.filter(s => s.cat === ch.dataset.c).length);
   render();
   if (curSite) openSite(curSite);
@@ -278,8 +282,9 @@ const tPart = v => { const t = String(v || '').slice(11, 16); return t === '00:0
 const fmtDT = v => v ? dPart(v).replace(/-/g, '/') + (tPart(v) ? ' ' + tPart(v) : '') : '';
 function endOfMonth(ym) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m, 0); return `${y}-${String(m).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function visible(s, ignoreMoto = false) {
-  if (!on[s.cat]) return false;
-  if (unvisitedOnly && s.visits.length) return false;
+  // 会議用は 60日/90日/120日/未定/完成済 と「未訪問のみ」を無視して全件（元請と検索だけ効く）
+  if (!MEET && !on[s.cat]) return false;
+  if (!MEET && unvisitedOnly && s.visits.length) return false;
   if (motoF && s['元請'] !== motoF && !ignoreMoto) return false;
   if (q && !s['現場名'].includes(q)) return false;
   return true;
@@ -302,7 +307,7 @@ let sortKey = 'due', sortAsc = true;
 function renderList() {
   const order = ['赤', '黄', '青', '灰', '未定', '完成済'];
   let items = DATA.sitesX.filter(s => visible(s));
-  const keyf = { due: s => [order.indexOf(s.cat), s.days ?? 9e9], name: s => s['現場名'], moto: s => s['元請'], last: s => s.visits[0]?.['日時'] || '', amount: s => [0, -(+s.amount || 0)] }[sortKey];
+  const keyf = { due: s => [order.indexOf(s.cat), s.days ?? 9e9], name: s => s['現場名'], moto: s => [motoIdx(s['元請']), s.days ?? 9e9], last: s => s.visits[0]?.['日時'] || '', amount: s => [0, -(+s.amount || 0)] }[sortKey];
   items.sort((a, b) => { const x = keyf(a), y = keyf(b); const r = Array.isArray(x) ? (x[0] - y[0] || x[1] - y[1]) : String(x).localeCompare(String(y), 'ja'); return sortAsc ? r : -r; });
   const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? '完成' : 'あと' + s.days + '日') : ''}` : '未定';
   const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}${MEET && s.amount !== '' ? `<br>${yen(s.amount)}千円` : ''}</div></div>`).join('');
@@ -313,8 +318,8 @@ function renderList() {
   DATA.sitesX.forEach(s => { if (!visible(s, true)) return; motoAll++; sumAll += +s.amount || 0; motoCount[s['元請']] = (motoCount[s['元請']] || 0) + 1; motoSum[s['元請']] = (motoSum[s['元請']] || 0) + (+s.amount || 0); });
   const sumTxt = n => MEET ? ` ／ ${yen(n)}千円` : '';
   const shown = items.reduce((a, s) => a + (+s.amount || 0), 0);
-  const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}${sumTxt(sumAll)}</button>${Object.keys(motoCount).sort((a, b) => a.localeCompare(b, 'ja')).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}${sumTxt(motoSum[m])}</button>`).join('')}${MEET ? '<button id="printbtn" class="print">印刷</button>' : ''}</div>` +
-    (MEET ? `<div class="sumline"><b>会議用</b>　${new Date().toLocaleDateString('ja-JP')} 現在　${motoF ? esc(motoF) : '全元請'}　${items.length}件　合計 <b>${yen(shown)}</b> 千円<span class="pnote">（表示中の色・絞り込みの範囲。未定・完成済は上のチップで出す）</span></div>` : '');
+  const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}${sumTxt(sumAll)}</button>${Object.keys(motoCount).sort((a, b) => motoIdx(a) - motoIdx(b)).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}${sumTxt(motoSum[m])}</button>`).join('')}${MEET ? '<button id="printbtn" class="print">印刷</button>' : ''}</div>` +
+    (MEET ? `<div class="sumline"><b>会議用</b>　${new Date().toLocaleDateString('ja-JP')} 現在　${motoF ? esc(motoF) : '全元請'}　${items.length}件　合計 <b>${yen(shown)}</b> 千円<span class="pnote">（会議用は残り日数・未定・完成済に関係なく全件）</span></div>` : '');
   $('#listpage').innerHTML = motobar + (MEET ? monthTable() : '') + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
     `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th>${MEET ? th('amount', '金額（千円）') : ''}</tr></thead><tbody>${rows}</tbody></table>`;
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
@@ -328,7 +333,7 @@ function monthTable() {
   const months = Array.from({ length: 12 }, (_, i) => { const d = new Date(fy, 3 + i, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
   const cols = [...months, '他年度', '未定'];
   const cell = {}, rowSum = {}, colSum = {}; let all = 0;
-  const motos = [...new Set(DATA.sitesX.map(s => s['元請']).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja'));
+  const motos = MOTO_ORDER;
   DATA.sitesX.forEach(s => {
     const v = +s.amount || 0; if (!v) return;
     const ym = String(s['消検月'] || '').slice(0, 7);
