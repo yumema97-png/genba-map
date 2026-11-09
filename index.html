@@ -55,6 +55,10 @@ input[type=time]{border:1px solid var(--line);border-radius:6px;padding:6px 8px;
 button.clr{border:0;background:#eee;border-radius:50%;width:26px;height:26px;flex:none;color:var(--muted)}
 button.del{float:right;border:1px solid var(--line);background:#fff;color:var(--red);border-radius:5px;font-size:11px;padding:1px 7px}
 #who{cursor:pointer}#who:empty{display:none}
+.btn.sm{padding:5px 10px;font-size:12px}.btn.danger{color:var(--red)}
+.tag{font-size:11px;padding:2px 7px;border-radius:4px;background:#e6eefb;color:var(--blu);font-weight:600}
+label.fl2{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);margin-bottom:8px}
+label.fl2 textarea{min-height:44px}
 .btn{border:0;border-radius:8px;padding:9px 14px;background:var(--acc);color:#fff;font-weight:600}
 .btn.sub{background:#e9e6dd;color:var(--fg)}
 .btn:disabled{opacity:.5}
@@ -122,6 +126,7 @@ table.lt .fl{font-size:11px;color:#2a6b2e}
   <span class="chip tog" id="firechip">消防署</span>
   <select id="moto"><option value="">元請：全部</option></select>
   <input type="search" id="q" placeholder="現場名で検索">
+  <span class="chip" id="addsite">＋物件</span>
   <span class="chip" id="reload">更新</span>
   <span class="chip" id="who" title="記録者を切り替える"></span>
 </header>
@@ -290,6 +295,7 @@ function openSite(name) {
   <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${s.days != null ? (s.days < 0 ? '' : `あと${s.days}日`) : ''}</span><a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}">Googleマップ ›</a></div>
     <div class="kv" style="margin-top:8px"><b>完成</b><span>${dueTxt}</span><b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${fireFor(s['住所']) ? `<b>所轄</b><span>${fireFor(s['住所']).name}（<a href="tel:${fireFor(s['住所']).tel}">${fireFor(s['住所']).tel}</a>）</span>` : ''}${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
     <div class="flags" style="margin-top:8px">${flags}${ex['搬入'] ? '<span class="on">搬入</span>' : '<span>搬入</span>'}</div></div>
+  <div class="row" style="gap:6px">${s['手入力'] ? '<span class="tag">アプリで追加</span><button class="btn sub sm" id="x_edit">編集</button><button class="btn sub sm danger" id="x_del">削除</button>' : ''}<button class="btn sub sm" id="x_loc">${s.lat == null ? '位置を設定' : '位置を直す'}</button></div>
   <div class="sec"><h3>訪問を記録</h3>
     <div class="row"><label>建物の進捗</label><select class="f" id="v_stage"><option value="">選択</option>${STAGES.map(x => `<option>${x}</option>`).join('')}</select></div>
     <textarea id="v_memo" placeholder="メモ"></textarea>
@@ -306,6 +312,8 @@ function openSite(name) {
     ${ex['更新日時'] ? `<div class="gps">最終更新 ${ex['更新日時'].slice(0, 16).replace('T', ' ')} ${esc(ex['更新者'])}</div>` : ''}</div>`;
   $('#sheet').classList.add('open');
   $('#v_send').onclick = () => sendVisit(s);
+  $('#x_loc').onclick = () => openForm('loc', s);
+  if (s['手入力']) { $('#x_edit').onclick = () => openForm('edit', s); $('#x_del').onclick = () => delSite(s); }
   $('#s_body').querySelectorAll('button.del').forEach(b => b.onclick = () => delVisit(s, s.visits[+b.dataset.i]));
   $('#e_save').onclick = () => saveExtra(s);
   $('#s_body').querySelectorAll('button.clr').forEach(b => b.onclick = () => { $('#' + b.dataset.c).value = ''; $('#' + b.dataset.c + 'T').value = ''; });
@@ -340,6 +348,62 @@ async function saveExtra(s) {
     toast('保存しました'); await load(true);
   } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
 }
+// ===== 物件の追加・編集・位置 =====
+// draft: 入力途中の内容。地図タップで位置を選ぶあいだ、フォームを閉じても残す
+let draft = null;
+function openForm(mode, s) {
+  if (!draft || draft.mode !== mode || draft.site !== (s ? s['現場名'] : '')) {
+    draft = { mode, site: s ? s['現場名'] : '', name: s ? s['現場名'] : '', moto: s ? s['元請'] : '', worker: s ? s['職人'] : '', ym: s && s['消検月'] ? String(s['消検月']).slice(0, 7) : '', note: s ? s['注意点'] : '', addr: s ? s['住所'] : '', lat: undefined, lng: undefined, how: '' };
+  }
+  const d = draft, full = mode !== 'loc';
+  curSite = null;
+  const motos = [...new Set(DATA.sitesX.map(x => x['元請']).filter(Boolean))];
+  $('#s_title').innerHTML = { add: '物件を追加', edit: '物件を編集', loc: '位置を直す' }[mode] + (mode !== 'add' ? `<small>${esc(d.site)}</small>` : '');
+  $('#s_body').innerHTML = `<div class="sec">
+    ${mode === 'add' ? `<label class="fl2">現場名（必須）<input class="f" id="f_name" value="${esc(d.name)}" placeholder="例：北2西22MS"></label>` : ''}
+    ${full ? `<label class="fl2">元請<input class="f" id="f_moto" list="motolist" value="${esc(d.moto)}"><datalist id="motolist">${motos.map(m => `<option value="${esc(m)}">`).join('')}</datalist></label>
+    <label class="fl2">職人<input class="f" id="f_worker" value="${esc(d.worker)}"></label>
+    <label class="fl2">消検月<input class="f" type="month" id="f_ym" value="${esc(d.ym)}"></label>
+    <label class="fl2">注意点<textarea id="f_note">${esc(d.note)}</textarea></label>` : ''}
+    <label class="fl2">住所<input class="f" id="f_addr" value="${esc(d.addr)}" placeholder="例：札幌市中央区北2条西22丁目（空なら現場名から推定）"></label>
+    <div class="row"><button class="btn sub sm" id="f_here">現在地にする</button><button class="btn sub sm" id="f_pick">地図をタップして決める</button></div>
+    <div class="gps" id="f_pos">${d.lat != null ? `位置：${d.how}（${(+d.lat).toFixed(5)}, ${(+d.lng).toFixed(5)}）<a href="#" id="f_clr">取り消す</a>` : '位置：住所から自動で決めます'}</div>
+    <div class="row" style="justify-content:flex-end"><button class="btn sub" id="f_cancel">やめる</button><button class="btn" id="f_save">${mode === 'add' ? '追加する' : '保存'}</button></div></div>`;
+  $('#sheet').classList.add('open');
+  const keep = () => { ['name', 'moto', 'worker', 'ym', 'note', 'addr'].forEach(k => { const el = $('#f_' + k); if (el) d[k] = el.value; }); };
+  $('#f_here').onclick = () => {
+    keep();
+    if (!myPos) { toast('位置情報がまだ取れていません'); return; }
+    d.lat = myPos.lat; d.lng = myPos.lng; d.how = '現在地'; openForm(mode, s);
+  };
+  $('#f_pick').onclick = () => {
+    keep(); $('#sheet').classList.remove('open'); toast('地図をタップして位置を決めてください');
+    map.getContainer().style.cursor = 'crosshair';
+    map.once('click', e => { map.getContainer().style.cursor = ''; d.lat = e.latlng.lat; d.lng = e.latlng.lng; d.how = '地図で指定'; openForm(mode, s); });
+  };
+  const clr = $('#f_clr'); if (clr) clr.onclick = e => { e.preventDefault(); keep(); d.lat = d.lng = undefined; openForm(mode, s); };
+  $('#f_cancel').onclick = () => { draft = null; if (s) openSite(s['現場名']); else $('#sheet').classList.remove('open'); };
+  $('#f_save').onclick = async () => {
+    keep(); const btn = $('#f_save'); btn.disabled = true;
+    try {
+      const body = { site: d.site, name: d.name, moto: d.moto, worker: d.worker, ym: d.ym, note: d.note, addr: d.addr };
+      if (d.lat != null) { body.lat = d.lat; body.lng = d.lng; }
+      body.action = { add: 'addSite', edit: 'updateSite', loc: 'setLocation' }[mode];
+      const j = await post(body);
+      const name = mode === 'add' ? j.name : d.site; draft = null;
+      toast(j.lat === '' ? '保存しました（位置は未設定）' : '保存しました');
+      await load(true); openSite(name);
+      const m = markers[name]; if (m) map.setView(m.getLatLng(), Math.max(map.getZoom(), 15));
+    } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
+  };
+}
+async function delSite(s) {
+  if (!confirm(`「${s['現場名']}」を一覧から削除します。\n訪問記録と物件情報は残ります（同じ名前で追加し直せば戻ります）。\nよろしいですか？`)) return;
+  try { await post({ action: 'deleteSite', site: s['現場名'] }); toast('削除しました'); $('#sheet').classList.remove('open'); curSite = null; await load(true); }
+  catch (e) { toast('削除失敗：' + e.message); }
+}
+$('#addsite').onclick = () => { draft = null; openForm('add', null); };
+
 function shrink(file) {
   return new Promise(res => {
     const img = new Image(); const url = URL.createObjectURL(file);

@@ -25,6 +25,9 @@ const SHEETS = {
 const SITE_COLS = ['現場名', '元請', '職人', '消検月', '図面', 'ELV', '見積', '受注', '発注', '着工', '設置', '下検査', '注意点', '住所', '緯度', '経度', '要確認', '取込日時'];
 const EXTRA_COLS = ['現場名', '消検日', '建築確認検査日', '搬入', '工事進捗メモ', '更新日時', '更新者'];
 const VISIT_COLS = ['日時', '記録者', '現場名', '建物進捗', 'メモ', '写真', '緯度', '経度', '距離m'];
+// アプリで追加した物件。Excel取り込みは触らない。同じ現場名がExcelに載ったらExcel側を出す
+const MANUAL_SHEET = '物件手入力';
+const MANUAL_COLS = ['現場名', '元請', '職人', '消検月', '注意点', '住所', '緯度', '経度', '登録日時', '登録者', '更新日時', '更新者'];
 const PHOTO_FOLDER = '現場写真';
 
 // ---------- 初期化 ----------
@@ -47,6 +50,7 @@ function setup() {
   ensure(SHEETS.sites, SITE_COLS);
   ensure(SHEETS.extra, EXTRA_COLS);
   ensure(SHEETS.visits, VISIT_COLS);
+  manualSheet();
   const cfg = ensure(SHEETS.config, ['キー', '値']);
   if (cfg.getLastRow() < 2) {
     cfg.getRange(2, 1, 4, 2).setValues([
@@ -73,7 +77,7 @@ function doGet(e) {
   if (p.pw !== cfg('パスワード')) return json({ ok: false, error: 'パスワードが違います' });
   return json({
     ok: true,
-    sites: readSheet(SHEETS.sites),
+    sites: allSites(),
     extra: readSheet(SHEETS.extra),
     visits: readSheet(SHEETS.visits),
     users: cfg('記録者').split(',').map(s => s.trim()).filter(Boolean),
@@ -92,10 +96,100 @@ function doPost(e) {
     if (body.action === 'visit') return json(addVisit(body));
     if (body.action === 'extra') return json(saveExtra(body));
     if (body.action === 'deleteVisit') return json(deleteVisit(body));
+    if (body.action === 'addSite') return json(addSite(body));
+    if (body.action === 'updateSite') return json(updateSite(body));
+    if (body.action === 'deleteSite') return json(deleteSite(body));
+    if (body.action === 'setLocation') return json(setLocation(body));
     return json({ ok: false, error: 'unknown action' });
   } finally {
     lock.releaseLock();
   }
+}
+
+// ---------- 物件（アプリで追加・位置の修正） ----------
+function manualSheet() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(MANUAL_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(MANUAL_SHEET);
+    sh.getRange(1, 1, 1, MANUAL_COLS.length).setValues([MANUAL_COLS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.getRange('D:D').setNumberFormat('@'); // 消検月 "2026-11" を日付にしない
+  }
+  return sh;
+}
+
+// Excelの物件＋アプリで追加した物件（Excelに同名があるものは除く）
+function allSites() {
+  const xs = readSheet(SHEETS.sites);
+  const names = new Set(xs.map(s => s['現場名']));
+  manualSheet();
+  const ms = readSheet(MANUAL_SHEET).filter(m => !names.has(m['現場名'])).map(m => ({ ...m, '手入力': 1, '要確認': m['緯度'] === '' ? '位置未設定' : '' }));
+  return xs.concat(ms);
+}
+
+function findRow(sh, name) {
+  const v = sh.getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) if (v[i][0] === name) return i + 1;
+  return 0;
+}
+
+function clean(s) { return String(s == null ? '' : s).trim(); }
+
+// 住所だけで緯度経度が無ければ座標を取る
+function locate_(addr, lat, lng) {
+  if (lat !== '' && lat != null && lng !== '' && lng != null) return { lat: Number(lat), lng: Number(lng) };
+  if (!addr) return { lat: '', lng: '' };
+  const g = geocode(/^北海道/.test(addr) ? addr : '北海道' + addr);
+  return g || { lat: '', lng: '' };
+}
+
+function addSite(b) {
+  const name = norm(b.name);
+  if (!name) return { ok: false, error: '現場名を入れてください' };
+  if (findRow(SpreadsheetApp.getActive().getSheetByName(SHEETS.sites), name) || findRow(manualSheet(), name)) return { ok: false, error: '同じ現場名がすでにあります' };
+  const addr = clean(b.addr) || nameToAddress(name);
+  const p = locate_(addr, b.lat, b.lng);
+  manualSheet().appendRow([name, clean(b.moto), clean(b.worker), clean(b.ym), clean(b.note), addr, p.lat, p.lng, new Date(), b.user || '', '', '']);
+  return { ok: true, name, lat: p.lat, lng: p.lng, addr };
+}
+
+function updateSite(b) {
+  const sh = manualSheet(), r = findRow(sh, b.site);
+  if (!r) return { ok: false, error: 'アプリで追加した物件だけ編集できます（Excelの物件はExcelで直してください）' };
+  const cur = sh.getRange(r, 1, 1, MANUAL_COLS.length).getValues()[0];
+  const addr = clean(b.addr);
+  const moved = addr !== String(cur[5]) || b.lat !== undefined;
+  const p = moved ? locate_(addr, b.lat, b.lng) : { lat: cur[6], lng: cur[7] };
+  sh.getRange(r, 2, 1, 7).setValues([[clean(b.moto), clean(b.worker), clean(b.ym), clean(b.note), addr, p.lat, p.lng]]);
+  sh.getRange(r, 11, 1, 2).setValues([[new Date(), b.user || '']]);
+  return { ok: true, lat: p.lat, lng: p.lng };
+}
+
+// アプリで追加した物件を消す。訪問記録と物件追加の行は残す（同じ名前で登録し直せば戻る）
+function deleteSite(b) {
+  const sh = manualSheet(), r = findRow(sh, b.site);
+  if (!r) return { ok: false, error: 'アプリで追加した物件だけ削除できます' };
+  sh.deleteRow(r);
+  return { ok: true };
+}
+
+// どの物件でも位置（住所・緯度経度）を直せる。Excelの物件は次の取り込みでもこの値が引き継がれる
+function setLocation(b) {
+  const addr = clean(b.addr);
+  const p = locate_(addr, b.lat, b.lng);
+  if (p.lat === '') return { ok: false, error: '位置が分かりませんでした。地図をタップして指定してください' };
+  let sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.sites), r = findRow(sh, b.site);
+  if (r) {
+    const c = n => SITE_COLS.indexOf(n) + 1;
+    sh.getRange(r, c('住所')).setValue(addr);
+    sh.getRange(r, c('緯度'), 1, 3).setValues([[p.lat, p.lng, '']]); // 緯度・経度・要確認
+    return { ok: true, lat: p.lat, lng: p.lng };
+  }
+  sh = manualSheet(); r = findRow(sh, b.site);
+  if (!r) return { ok: false, error: '物件が見つかりません' };
+  sh.getRange(r, 6, 1, 3).setValues([[addr, p.lat, p.lng]]);
+  return { ok: true, lat: p.lat, lng: p.lng };
 }
 
 function addVisit(b) {
@@ -210,6 +304,9 @@ function importFromExcel() {
   const ss = SpreadsheetApp.openById(tmp.id);
   const sitesSh = SpreadsheetApp.getActive().getSheetByName(SHEETS.sites);
   const old = {};
+  // アプリで先に登録してあった物件がExcelに載ったら、その住所・座標を使う
+  manualSheet();
+  readSheet(MANUAL_SHEET).forEach(r => (old[r['現場名']] = { '住所': r['住所'], '緯度': r['緯度'], '経度': r['経度'] }));
   readSheet(SHEETS.sites).forEach(r => (old[r['現場名']] = r));
 
   const rows = [];
