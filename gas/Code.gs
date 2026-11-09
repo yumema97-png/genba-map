@@ -183,7 +183,20 @@ function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
-// ---------- Excel 週次取り込み ----------
+// ---------- Excel 取り込み ----------
+// 毎朝トリガーで呼ぶ。ドライブのExcelが前回取り込み後に更新されていたときだけ取り込む。
+// Excelはパソコンのタスク「現場マップExcel複製」が火曜・土曜の夜にサーバーから複製している。
+function importIfChanged() {
+  const it = DriveApp.getFilesByName(cfg('Excelファイル名'));
+  if (!it.hasNext()) throw new Error('Excelが見つかりません: ' + cfg('Excelファイル名'));
+  const updated = it.next().getLastUpdated().getTime();
+  const props = PropertiesService.getScriptProperties();
+  if (Number(props.getProperty('excelUpdated') || 0) >= updated) return '変更なし';
+  const n = importFromExcel();
+  props.setProperty('excelUpdated', String(updated));
+  return n + '件取り込み';
+}
+
 function importFromExcel() {
   const fname = cfg('Excelファイル名');
   const it = DriveApp.getFilesByName(fname);

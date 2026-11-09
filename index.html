@@ -30,6 +30,7 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .pin.visited::after{content:"✓";position:absolute;inset:0;transform:rotate(45deg);color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:14px}
 .pin.flag{border-color:#000;border-width:3px}
 .pin.non{border-style:dashed;border-color:#555;background:#fff}
+.fire{width:22px;height:22px;border-radius:5px;background:#fff;border:2px solid #b3261e;color:#b3261e;font-size:12px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 #sheet{position:fixed;left:0;right:0;bottom:0;max-height:82%;background:var(--panel);border-radius:14px 14px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.25);transform:translateY(100%);transition:transform .2s;display:flex;flex-direction:column;z-index:1000;padding-bottom:env(safe-area-inset-bottom)}
 #sheet.open{transform:none}
 #sheet .hd{padding:10px 14px 6px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:8px}
@@ -118,6 +119,7 @@ table.lt .fl{font-size:11px;color:#2a6b2e}
   <span class="chip off" data-c="未定"><i class="dot" style="background:var(--non)"></i>未定 <b></b></span>
   <span class="chip off" data-c="完成済"><i class="dot" style="background:var(--done)"></i>完成済 <b></b></span>
   <span class="chip tog" id="unvisited">未訪問のみ</span>
+  <span class="chip tog" id="firechip">消防署</span>
   <select id="moto"><option value="">元請：全部</option></select>
   <input type="search" id="q" placeholder="現場名で検索">
   <span class="chip" id="reload">更新</span>
@@ -138,6 +140,20 @@ table.lt .fl{font-size:11px;color:#2a6b2e}
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzlpBd0scg1cLx1h7VyowWb2DHEhXkbUFhFjTxanTUpHLuTQI4uZBvIP294g4VRuTORLA/exec';
 const BANDS = [[60, '赤'], [90, '黄'], [120, '青']]; // 残り日数 → 区分
 const STAGES = ['基礎', '躯体', '外装', 'ボード', '天井', '仕上げ', '完了'];
+// 札幌市の消防署（出典：札幌市「消防局・消防署（所）一覧」2026-04-07更新。位置は国土地理院の住所検索＝丁目の代表点）
+const FIRE = [
+  { ku: '中央区', name: '中央消防署', addr: '中央区南4条西10丁目', tel: '011-215-2120', lat: 43.05430, lng: 141.34293 },
+  { ku: '北区', name: '北消防署', addr: '北区北24条西8丁目', tel: '011-737-2100', lat: 43.09014, lng: 141.33754 },
+  { ku: '東区', name: '東消防署', addr: '東区北24条東17丁目', tel: '011-781-2100', lat: 43.09477, lng: 141.37454 },
+  { ku: '白石区', name: '白石消防署', addr: '白石区南郷通6丁目北', tel: '011-861-2100', lat: 43.04206, lng: 141.40936 },
+  { ku: '厚別区', name: '厚別消防署', addr: '厚別区厚別中央1条5丁目', tel: '011-892-2100', lat: 43.03604, lng: 141.47295 },
+  { ku: '豊平区', name: '豊平消防署', addr: '豊平区月寒東1条8丁目', tel: '011-852-2100', lat: 43.02975, lng: 141.39966 },
+  { ku: '清田区', name: '清田消防署', addr: '清田区平岡1条1丁目', tel: '011-883-2100', lat: 42.99849, lng: 141.44351 },
+  { ku: '南区', name: '南消防署', addr: '南区真駒内上町5丁目', tel: '011-581-2100', lat: 42.99646, lng: 141.35828 },
+  { ku: '西区', name: '西消防署', addr: '西区発寒10条4丁目', tel: '011-667-2100', lat: 43.09171, lng: 141.29214 },
+  { ku: '手稲区', name: '手稲消防署', addr: '手稲区手稲本町2条5丁目', tel: '011-681-2100', lat: 43.12172, lng: 141.23856 },
+];
+const fireFor = addr => { const m = /札幌市(.+?区)/.exec(addr || ''); return m ? FIRE.find(f => f.ku === m[1]) : null; };
 // ===============
 
 const COL = { '赤': '#d64541', '黄': '#e0a82e', '青': '#2f6fba', '灰': '#8a8d84', '未定': '#cfcbc0', '完成済': '#b9b6ad' };
@@ -155,6 +171,13 @@ const map = L.map('map', { zoomControl: false }).setView([43.06, 141.37], 12);
 L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', { attribution: '地理院タイル', maxZoom: 18 }).addTo(map);
 L.control.zoom({ position: 'bottomleft' }).addTo(map);
 layer.addTo(map);
+// 消防署レイヤー（物件ピンとは別。チップで表示切替）
+const fireLayer = L.layerGroup(FIRE.map(f => L.marker([f.lat, f.lng], {
+  icon: L.divIcon({ className: '', html: '<div class="fire">消</div>', iconSize: [22, 22], iconAnchor: [11, 11] }), zIndexOffset: -500,
+}).bindTooltip(f.name, { direction: 'top', offset: [0, -10] })
+  .bindPopup(`<b>${f.name}</b><br>${f.addr}<br><a href="tel:${f.tel}">${f.tel}</a>（予防課）<br><a target="_blank" href="https://www.google.com/maps/search/?api=1&query=${f.lat},${f.lng}">Googleマップ ›</a>`)));
+let fireOn = store.get('fire') !== '0';
+if (fireOn) fireLayer.addTo(map);
 let meMarker = null;
 function locate() {
   if (!navigator.geolocation) return;
@@ -265,7 +288,7 @@ function openSite(name) {
   const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' ? ` ／ ${v['距離m']}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}<button class="del" data-i="${i}">削除</button></div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="${img(id, 1600)}" target="_blank"><img src="${img(id, 200)}" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
   $('#s_body').innerHTML = `
   <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${s.days != null ? (s.days < 0 ? '' : `あと${s.days}日`) : ''}</span><a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}">Googleマップ ›</a></div>
-    <div class="kv" style="margin-top:8px"><b>完成</b><span>${dueTxt}</span><b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
+    <div class="kv" style="margin-top:8px"><b>完成</b><span>${dueTxt}</span><b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${fireFor(s['住所']) ? `<b>所轄</b><span>${fireFor(s['住所']).name}（<a href="tel:${fireFor(s['住所']).tel}">${fireFor(s['住所']).tel}</a>）</span>` : ''}${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
     <div class="flags" style="margin-top:8px">${flags}${ex['搬入'] ? '<span class="on">搬入</span>' : '<span>搬入</span>'}</div></div>
   <div class="sec"><h3>訪問を記録</h3>
     <div class="row"><label>建物の進捗</label><select class="f" id="v_stage"><option value="">選択</option>${STAGES.map(x => `<option>${x}</option>`).join('')}</select></div>
@@ -334,6 +357,8 @@ function shrink(file) {
 document.querySelectorAll('.chip[data-c]').forEach(ch => ch.onclick = () => { const c = ch.dataset.c; on[c] = !on[c]; ch.classList.toggle('off', !on[c]); render(); });
 $('#unvisited').onclick = e => { unvisitedOnly = !unvisitedOnly; e.target.classList.toggle('on', unvisitedOnly); render(); };
 $('#moto').onchange = e => { motoF = e.target.value; render(); };
+$('#firechip').classList.toggle('on', fireOn);
+$('#firechip').onclick = e => { fireOn = !fireOn; e.target.classList.toggle('on', fireOn); if (fireOn) fireLayer.addTo(map); else map.removeLayer(fireLayer); store.set('fire', fireOn ? '1' : '0'); };
 $('#q').oninput = e => { q = e.target.value.trim(); render(); };
 $('#reload').onclick = () => load(true).then(ok => ok && toast('更新しました'));
 $('#s_close').onclick = () => { $('#sheet').classList.remove('open'); curSite = null; };
