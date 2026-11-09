@@ -2,7 +2,7 @@
 
 工事現場を完成（消防検査）までの残り日数で色分けして地図に出し、現場で訪問記録・写真・進捗を残すためのスマホ向けページ。
 
-- 地図ページ：`index.html`（GitHub Pages で公開）
+- 地図ページ：`index.html`（Vercel で公開 https://yashima-genba.vercel.app/ ）
 - データ：Googleスプレッドシート「現場マップDB」
 - 裏側：`gas/Code.gs`（スプレッドシートに紐付けた Apps Script）
 
@@ -19,7 +19,7 @@ Excel（共有サーバー → Googleドライブ同期）
    設定      … パスワード・記録者・Excelファイル名・現地判定の距離
    ▲
    │ 読み書き（GAS ウェブアプリ）
-index.html（GitHub Pages）
+index.html（Vercel）
 ```
 
 ## ピンの色
@@ -58,8 +58,8 @@ index.html（GitHub Pages）
 
 ### 2. 地図ページ
 1. `index.html` の `GAS_URL = 'PASTE_GAS_WEBAPP_URL_HERE'` を上のURLに差し替えて push
-2. GitHub のリポジトリ設定 → Pages → Branch を `main` / `(root)` にして保存
-3. 数分後に `https://<ユーザー名>.github.io/genba-map/` で開ける
+2. Vercel で GitHub のリポジトリを Import（設定はそのまま、Application Preset は Other）。main に push するたびに自動で反映される
+3. 公開URL https://yashima-genba.vercel.app/
 4. スマホで開いて「ホーム画面に追加」しておくとアプリのように使える
 
 ### 3. 週1の自動更新

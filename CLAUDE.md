@@ -5,9 +5,9 @@
 依頼者：Yoko（株式会社ヤシマ商会 業務部）。やり取りは日本語。文章は人間っぽく、簡潔に。
 
 ## 現在の構成（2026-11-05 時点）
-- `index.html` … 地図＋一覧のシングルページ。Leaflet（unpkg CDN）＋地理院タイル。GitHub Pages で公開予定
+- `index.html` … 地図＋一覧のシングルページ。Leaflet（unpkg CDN）＋地理院タイル。Vercel（プロジェクト yashima-genba、チーム syoubou）で公開。https://yashima-genba.vercel.app/ 。main に push すると自動デプロイ
 - `gas/Code.gs` … Google Apps Script。スプレッドシート「現場マップDB」に紐付けて使う
-- `README.md` … セットアップ手順（スプレッドシート → GAS → Pages → トリガー）
+- `README.md` … セットアップ手順（スプレッドシート → GAS → Vercel → トリガー）
 - スプレッドシート「現場マップDB」は Yoko の Google ドライブ（yumema97）に作成済み。物件シートに165件入り（座標付き117件、完成済み48件は座標なし）
 
 ## 仕様（決まっていること）
@@ -26,7 +26,7 @@
 ## 未完了・次にやること
 1. ~~GAS デプロイ~~ **2026-11-05 済**。Apps Script「現場マップ」（現場マップDBにバインド、Drive API v3 追加）をウェブアプリ（実行者: 自分 / アクセス: 全員）でデプロイし、URLを `GAS_URL` に入れた。GETで物件165件・座標117件が返るのを確認。パスワードは設定シートで変更済み（Code.gs の初期値 `genba` は公開されているので使わない）。Code.gs を直したら「デプロイを管理」→ 既存デプロイを新バージョンで更新する（新規デプロイにするとURLが変わる）
    - Excel（`\\server1\共有2\営業\①.業務-営業調整資料\令和8年度　マンション物件.xlsx`）は**まだドライブに同期していない**。設定シートのExcelファイル名は `令和8年度　マンション物件.xlsx`（全角スペース）。同期ができるまで `importFromExcel` と週次トリガーは保留
-2. ~~GitHub Pages 有効化~~ **2026-11-05 済**。公開URL https://yumema97-png.github.io/genba-map/ 。`gh api -X POST repos/yumema97-png/genba-map/pages -f "source[branch]=main" -f "source[path]=/"` で有効化できた（以前の失敗はJSONの渡し方の問題）。ページからGASへのfetch（CORS）が通ることを確認
+2. ~~GitHub Pages 有効化~~ **2026-11-05 済**。（2026-11-09 に Vercel へ移して Pages は停止。github.io のURLが嫌とのこと）。`gh api -X POST repos/yumema97-png/genba-map/pages -f "source[branch]=main" -f "source[path]=/"` で有効化できた（以前の失敗はJSONの渡し方の問題）。ページからGASへのfetch（CORS）が通ることを確認
 3. ~~動作確認~~ **2026-11-05 済**（Yoko がスマホで写真・GPS距離・消検日の保存を確認）。その後の要望で直したもの：
    - 写真は `lh3.googleusercontent.com/d/<id>=w<幅>` で表示（drive.google.com の閲覧画面はログインを求められる）
    - 消検日・建築確認検査日に時刻（任意）。シートには `yyyy/MM/dd HH:mm` の文字列で書き、時刻 00:00 は「時刻なし」扱い

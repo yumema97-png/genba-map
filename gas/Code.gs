@@ -68,6 +68,8 @@ function cfg(key) {
 // ---------- Web API ----------
 function doGet(e) {
   const p = (e && e.parameter) || {};
+  // 記録者の名前だけはパスワードなしで返す（ログイン画面で最初から選べるように。2026-11-09 Yoko 了承）
+  if (p.mode === 'users') return json({ ok: true, users: cfg('記録者').split(',').map(s => s.trim()).filter(Boolean) });
   if (p.pw !== cfg('パスワード')) return json({ ok: false, error: 'パスワードが違います' });
   return json({
     ok: true,

@@ -345,17 +345,25 @@ $('#s_close').onclick = () => { $('#sheet').classList.remove('open'); curSite = 
   if (pw && user) { $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; if (await load(false)) locate(); else showLogin(); }
   else showLogin();
 })();
-// 記録者の名前は設定シートにあり、パスワードが合ったときだけサーバから返る（名前を外に出さないため）
+// 記録者の名前は設定シートにあり、ログイン画面を開いたときにパスワードなしで取る
+async function fetchUsers() {
+  try {
+    const j = await (await fetch(`${GAS_URL}?mode=users&t=${Date.now()}`)).json();
+    if (j.ok && j.users) { store.set('users', j.users.join(',')); fillUsers(j.users); }
+  } catch (e) {}
+}
 function fillUsers(list) {
-  const sel = $('#l_user'); sel.innerHTML = '';
+  const sel = $('#l_user'), prev = sel.value; sel.innerHTML = '';
   if (list && list.length) { sel.add(new Option('選んでください', '')); list.forEach(u => sel.add(new Option(u))); }
-  else sel.innerHTML = '<option value="">（パスワードを入れると選べます）</option>';
-  if (store.get('user') && list && list.includes(store.get('user'))) sel.value = store.get('user');
+  else sel.innerHTML = '<option value="">（読み込み中…）</option>';
+  const keep = prev || store.get('user');
+  if (keep && list && list.includes(keep)) sel.value = keep;
 }
 function showLogin() {
   $('#login').style.display = 'flex';
   const cached = store.get('users'); fillUsers(cached ? cached.split(',') : null);
   if (store.get('pw')) $('#l_pw').value = store.get('pw');
+  fetchUsers();
 }
 let pending = null; // パスワード確認の結果（{pw, j}）
 async function checkPw() {
