@@ -56,6 +56,15 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .sumline{padding:6px 14px;font-size:13px;border-bottom:1px solid var(--line);background:#fffbea}
 .sumline .pnote{color:var(--muted);font-size:11px;margin-left:8px}
 table.lt td.num{text-align:right;font-variant-numeric:tabular-nums}
+.pvwrap{padding:10px 12px;border-bottom:1px solid var(--line);overflow-x:auto}
+.pvtitle{font-size:13px;font-weight:700;margin-bottom:6px}
+table.pv{border-collapse:collapse;font-size:12px;white-space:nowrap}
+table.pv th,table.pv td{border:1px solid var(--line);padding:4px 7px}
+table.pv thead th{background:#ece9df;color:var(--muted);font-weight:600}
+table.pv tbody th{text-align:left;background:#f6f4ee;font-weight:600}
+table.pv td.num{text-align:right;font-variant-numeric:tabular-nums;min-width:52px}
+table.pv .tot,table.pv tr.tot th,table.pv tr.tot td{font-weight:700;background:#fffbea}
+table.pv tr.sel th{background:#dfe8f6}
 /* 会議用の印刷：一覧の表だけをA4横で */
 @media print{
   @page{size:A4 landscape;margin:10mm}
@@ -66,7 +75,9 @@ table.lt td.num{text-align:right;font-variant-numeric:tabular-nums}
   table.lt th{position:static;background:#eee!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   table.lt td{padding:3px 5px;white-space:normal}
   table.lt tr{break-inside:avoid}
-  .dot,.sumline{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .dot,.sumline,table.pv th,table.pv td{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .pvwrap{overflow:visible;break-after:auto}
+  table.pv{font-size:10px}
 }
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;color:#fff;font-size:12px;font-weight:600}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -300,12 +311,33 @@ function renderList() {
   const shown = items.reduce((a, s) => a + (+s.amount || 0), 0);
   const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}${sumTxt(sumAll)}</button>${Object.keys(motoCount).sort((a, b) => a.localeCompare(b, 'ja')).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}${sumTxt(motoSum[m])}</button>`).join('')}${MEET ? '<button id="printbtn" class="print">印刷</button>' : ''}</div>` +
     (MEET ? `<div class="sumline"><b>会議用</b>　${new Date().toLocaleDateString('ja-JP')} 現在　${motoF ? esc(motoF) : '全元請'}　${items.length}件　合計 <b>${yen(shown)}</b> 千円<span class="pnote">（表示中の色・絞り込みの範囲。未定・完成済は上のチップで出す）</span></div>` : '');
-  $('#listpage').innerHTML = motobar + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
+  $('#listpage').innerHTML = motobar + (MEET ? monthTable() : '') + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
     `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th>${MEET ? th('amount', '金額（千円）') : ''}</tr></thead><tbody>${rows}</tbody></table>`;
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
   $('#listpage').querySelectorAll('.motobar button[data-m]').forEach(el => el.onclick = () => { motoF = el.dataset.m; $('#moto').value = motoF; render(); });
   if ($('#printbtn')) $('#printbtn').onclick = () => window.print();
   $('#listpage').querySelectorAll('th[data-k]').forEach(el => el.onclick = () => { if (sortKey === el.dataset.k) sortAsc = !sortAsc; else { sortKey = el.dataset.k; sortAsc = true; } renderList(); });
+}
+// 会議用：電気屋（元請）× 消検月 の金額（千円）。今年度4月〜3月。色チップや絞り込みに関係なく全物件で集計
+function monthTable() {
+  const now = new Date(), fy = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+  const months = Array.from({ length: 12 }, (_, i) => { const d = new Date(fy, 3 + i, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
+  const cols = [...months, '他年度', '未定'];
+  const cell = {}, rowSum = {}, colSum = {}; let all = 0;
+  const motos = [...new Set(DATA.sitesX.map(s => s['元請']).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja'));
+  DATA.sitesX.forEach(s => {
+    const v = +s.amount || 0; if (!v) return;
+    const ym = String(s['消検月'] || '').slice(0, 7);
+    const c = !ym ? '未定' : months.includes(ym) ? ym : '他年度';
+    const k = s['元請'] + '|' + c;
+    cell[k] = (cell[k] || 0) + v; rowSum[s['元請']] = (rowSum[s['元請']] || 0) + v; colSum[c] = (colSum[c] || 0) + v; all += v;
+  });
+  const show = cols.filter(c => !['他年度', '未定'].includes(c) || colSum[c]); // 使っていない「他年度」「未定」は出さない
+  const head = c => c.length === 7 ? `${+c.slice(5)}月` : c;
+  const td = v => `<td class="num">${v ? yen(v) : ''}</td>`;
+  return `<div class="pvwrap"><div class="pvtitle">消検月別の金額（千円）　${fy}年度（${fy}年4月〜${fy + 1}年3月）</div><table class="pv"><thead><tr><th>元請</th>${show.map(c => `<th>${head(c)}</th>`).join('')}<th>合計</th></tr></thead><tbody>` +
+    motos.filter(m => rowSum[m]).map(m => `<tr${motoF === m ? ' class="sel"' : ''}><th>${esc(m)}</th>${show.map(c => td(cell[m + '|' + c])).join('')}<td class="num tot">${yen(rowSum[m])}</td></tr>`).join('') +
+    `<tr class="tot"><th>合計</th>${show.map(c => td(colSum[c])).join('')}<td class="num tot">${yen(all)}</td></tr></tbody></table></div>`;
 }
 function showTab(t) {
   document.body.classList.toggle('list', t === 'list');
