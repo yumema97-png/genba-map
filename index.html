@@ -55,6 +55,24 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .motobar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
 .motobar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 body.meet header .chip[data-c],body.meet #unvisited{display:none}
+/* 会議用は会議室の画面で見るので大きく（印刷は下の @media print のまま） */
+@media screen{
+  body.meet .motobar button{font-size:16px;padding:7px 14px}
+  body.meet .sumline{font-size:18px;padding:10px 16px}
+  body.meet .sumline .pnote{font-size:13px}
+  body.meet .pvwrap{padding:14px 16px}
+  body.meet .pvtitle{font-size:20px;margin-bottom:10px}
+  body.meet table.pv{width:100%;font-size:18px}
+  body.meet table.pv th,body.meet table.pv td{padding:8px 10px}
+  body.meet table.pv td.num{min-width:70px}
+  body.meet table.pv td.num small{font-size:13px}
+  body.meet .pvwrap .pnote{font-size:14px}
+  body.meet table.lt{font-size:16px}
+  body.meet table.lt th{font-size:15px}
+  body.meet table.lt td{padding:9px 10px}
+  body.meet table.lt .fl{font-size:13px}
+  body.meet .item{font-size:16px}
+}
 .motobar button.print{margin-left:auto;background:var(--blu);color:#fff;border-color:var(--blu)}
 .sumline{padding:6px 14px;font-size:13px;border-bottom:1px solid var(--line);background:#fffbea}
 .sumline .pnote{color:var(--muted);font-size:11px;margin-left:8px}
