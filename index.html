@@ -28,7 +28,9 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .pin{width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.45);position:relative}
 .pin.visited{opacity:.55}
 .pin.visited::after{content:"✓";position:absolute;inset:0;transform:rotate(45deg);color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:14px}
-.pin.flag{border-color:#000;border-width:3px}
+.pin.flag{border-color:#22251f;border-width:2px;box-shadow:0 0 0 2px #fff,0 1px 4px rgba(0,0,0,.5)}
+.pwrap{position:relative}
+.ptag{position:absolute;left:15px;top:-14px;white-space:nowrap;background:#22251f;color:#fff;font-size:10px;font-weight:700;line-height:1;padding:3px 5px;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.35);pointer-events:none}
 .pin.non{border-style:dashed;border-color:#555;background:#fff}
 .fire{width:22px;height:22px;border-radius:5px;background:#fff;border:2px solid #b3261e;color:#b3261e;font-size:12px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 #sheet{position:fixed;left:0;right:0;bottom:0;max-height:82%;background:var(--panel);border-radius:14px 14px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.25);transform:translateY(100%);transition:transform .2s;display:flex;flex-direction:column;z-index:1000;padding-bottom:env(safe-area-inset-bottom)}
@@ -287,7 +289,9 @@ function render() {
   DATA.sitesX.forEach(s => {
     if (!visible(s) || s.lat == null) return;
     const cls = ['pin', s.cat === '未定' ? 'non' : '', s.visits.length ? 'visited' : '', s.dueExact ? 'flag' : ''].join(' ');
-    const icon = L.divIcon({ className: '', html: `<div class="${cls}" style="background:${COL[s.cat]}"></div>`, iconSize: [18, 18], iconAnchor: [9, 18] });
+    // 消検日が日付で決まっている現場は、ピンの横に「消検 11/10」の札を付ける
+    const tag = s.dueExact ? `<span class="ptag">消検 ${+s.due.slice(5, 7)}/${+s.due.slice(8, 10)}</span>` : '';
+    const icon = L.divIcon({ className: 'pwrap', html: `<div class="${cls}" style="background:${COL[s.cat]}"></div>${tag}`, iconSize: [18, 18], iconAnchor: [9, 18] });
     const m = L.marker([s.lat, s.lng], { icon }).on('click', () => openSite(s['現場名']));
     m.bindTooltip(s['現場名'], { direction: 'top', offset: [0, -16] });
     layer.addLayer(m); markers[s['現場名']] = m;
