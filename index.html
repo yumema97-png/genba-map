@@ -399,8 +399,7 @@ function renderList() {
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
   $('#listpage').querySelectorAll('.motobar button[data-m]').forEach(el => el.onclick = () => { motoF = el.dataset.m; $('#moto').value = motoF; render(); });
   if ($('#printbtn')) $('#printbtn').onclick = () => window.print();
-  // 表の見出しを電気屋ボタンの帯の下に貼り付ける（帯に隠れないように）
-  const mb = $('#listpage .motobar'); $('#listpage').style.setProperty('--mb', (mb ? mb.offsetHeight : 0) + 'px');
+  setMB();
   $('#listpage').querySelectorAll('th[data-k]').forEach(el => el.onclick = () => { if (sortKey === el.dataset.k) sortAsc = !sortAsc; else { sortKey = el.dataset.k; sortAsc = true; } renderList(); });
 }
 // 会議用：電気屋（元請）× 消検月 の金額（千円）。今年度4月〜3月。色チップや絞り込みに関係なく全物件で集計
@@ -426,9 +425,14 @@ function monthTable() {
     motos.filter(m => rowSum[m]).map(m => `<tr${motoF === m ? ' class="sel"' : ''}><th>${esc(m)}</th>${show.map(c => td(cell[m + '|' + c], cnt[m + '|' + c])).join('')}${td(rowSum[m], cnt['r|' + m], 'tot')}</tr>`).join('') +
     `<tr class="tot"><th>合計</th>${show.map(c => td(colSum[c], cnt['c|' + c])).join('')}${td(all, allN, 'tot')}</tr></tbody></table><div class="pnote" style="margin-top:4px">上段＝金額（千円）、下段＝件数（金額が入っている物件の数）</div></div>`;
 }
+// 表の見出しを電気屋ボタンの帯の下に貼り付ける（帯に隠れないように）。
+// 一覧が隠れている間は帯の高さが0なので、一覧を開いたとき・画面の大きさが変わったときにも測り直す
+function setMB() { const mb = $('#listpage .motobar'); if (mb && mb.offsetHeight) $('#listpage').style.setProperty('--mb', mb.offsetHeight + 'px'); }
+window.addEventListener('resize', setMB);
 function showTab(t) {
   if (t === 'list') cancelPick();
   document.body.classList.toggle('list', t === 'list');
+  if (t === 'list') setMB();
   document.querySelectorAll('.tabs span').forEach(x => x.classList.toggle('on', x.dataset.t === t));
   if (t === 'map') setTimeout(() => map.invalidateSize(), 50);
 }
