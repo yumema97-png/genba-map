@@ -794,7 +794,7 @@ async function openAdmin() {
     tr.querySelector('.a_del').onclick = () => { if (confirm(`職人「${tr.dataset.n}」を削除します（ログインできなくなります。物件や訪問記録は消えません）。よろしいですか？`)) run({ action: 'deleteAccount', name: tr.dataset.n }, '削除しました'); };
   });
   $('#n_gen').onclick = () => { $('#n_pw').value = genPw(); };
-  $('#n_add').onclick = () => run({ action: 'saveAccount', name: $('#n_name').value.trim(), newPw: $('#n_pw').value.trim(), worker: $('#n_w').value.trim() }, '追加しました');
+  $('#n_add').onclick = () => run({ action: 'saveAccount', isNew: true, name: $('#n_name').value.trim(), newPw: $('#n_pw').value.trim(), worker: $('#n_w').value.trim() }, '追加しました');
   const shared = kind => async () => {
     const pw = $('#p_' + kind).value.trim();
     if (!confirm(`${kind === 'meeting' ? '会議用' : '普段用'}のパスワードを「${pw}」に変えます。よろしいですか？`)) return;

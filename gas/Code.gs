@@ -150,6 +150,7 @@ function saveAccount(b) {
     if (v[i][0] === (oldName || name)) r = i + 1;
     else if (v[i][0] === name) return { ok: false, error: '同じ名前の職人がいます' };
   }
+  if (b.isNew && r) return { ok: false, error: '同じ名前の職人がいます（変えるときは一覧の「保存」で）' }; // 追加で既存を上書きしない
   const row = [txt(name), txt(pw), txt(worker), txt(r ? v[r - 1][3] : b.memo)];
   if (r) sh.getRange(r, 1, 1, row.length).setValues([row]); else sh.appendRow(row);
   return { ok: true };
