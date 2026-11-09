@@ -45,6 +45,13 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .flags{display:flex;flex-wrap:wrap;gap:4px}
 .flags span{font-size:11px;padding:2px 7px;border-radius:4px;background:#eee;color:#999}
 .flags span.on{background:#dfeedc;color:#2a6b2e;font-weight:600}
+.flags span.tap{cursor:pointer;user-select:none;padding:4px 9px;font-size:12px;min-width:44px;text-align:center;border:1px solid transparent}
+.flags span.na{background:#eceae4;color:#77786f}
+.flags span.tri{background:#fbefd2;color:#8a5a00;font-weight:600}
+.flags span.app{border-color:var(--blu)}
+.motobar{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}
+.motobar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
+.motobar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;color:#fff;font-size:12px;font-weight:600}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .row label{font-size:12px;color:var(--muted)}
@@ -229,14 +236,15 @@ function build() {
   if (curSite) openSite(curSite);
 }
 // 日時の値は "2026-12-01T10:00:00"。時刻 00:00 は「時刻なし」として扱う
-const dPart = v => String(v || '').slice(0, 10);
+const normF = v => (v === '○' ? '〇' : String(v || '')); // Excelの○は2種類ある
+const dPart = v =>String(v || '').slice(0, 10);
 const tPart = v => { const t = String(v || '').slice(11, 16); return t === '00:00' ? '' : t; };
 const fmtDT = v => v ? dPart(v).replace(/-/g, '/') + (tPart(v) ? ' ' + tPart(v) : '') : '';
 function endOfMonth(ym) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m, 0); return `${y}-${String(m).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-function visible(s) {
+function visible(s, ignoreMoto = false) {
   if (!on[s.cat]) return false;
   if (unvisitedOnly && s.visits.length) return false;
-  if (motoF && s['元請'] !== motoF) return false;
+  if (motoF && s['元請'] !== motoF && !ignoreMoto) return false;
   if (q && !s['現場名'].includes(q)) return false;
   return true;
 }
@@ -255,16 +263,21 @@ function render() {
 let sortKey = 'due', sortAsc = true;
 function renderList() {
   const order = ['赤', '黄', '青', '灰', '未定', '完成済'];
-  let items = DATA.sitesX.filter(visible);
+  let items = DATA.sitesX.filter(s => visible(s));
   const keyf = { due: s => [order.indexOf(s.cat), s.days ?? 9e9], name: s => s['現場名'], moto: s => s['元請'], last: s => s.visits[0]?.['日時'] || '' }[sortKey];
   items.sort((a, b) => { const x = keyf(a), y = keyf(b); const r = Array.isArray(x) ? (x[0] - y[0] || x[1] - y[1]) : String(x).localeCompare(String(y), 'ja'); return sortAsc ? r : -r; });
   const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? '完成' : 'あと' + s.days + '日') : ''}` : '未定';
   const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}</div></div>`).join('');
   const th = (k, t) => `<th data-k="${k}">${t}${sortKey === k ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>`;
-  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td><b>${esc(s['現場名'])}</b>${s['要確認'] ? ` <span style="color:var(--red)">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? fmtDT(s.ex['消検日']) : s.due.slice(0, 7).replace('-', '/') + '（月）') : '未定'}</td><td>${s.days != null ? (s.days < 0 ? '完成' : s.days) : ''}</td><td>${fmtDT(s.ex['建築確認検査日'])}</td><td class="fl">${FLAGS.filter(f => s[f] === '〇').join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td></tr>`).join('');
-  $('#listpage').innerHTML = (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
+  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td><b>${esc(s['現場名'])}</b>${s['要確認'] ? ` <span style="color:var(--red)">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? fmtDT(s.ex['消検日']) : s.due.slice(0, 7).replace('-', '/') + '（月）') : '未定'}</td><td>${s.days != null ? (s.days < 0 ? '完成' : s.days) : ''}</td><td>${fmtDT(s.ex['建築確認検査日'])}</td><td class="fl">${FLAGS.filter(f => ['〇', '△'].includes(normF(s[f]))).map(f => f + (normF(s[f]) === '△' ? '△' : '')).join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td></tr>`).join('');
+  // 電気屋（元請）ボタン。件数は元請以外の絞り込みを効かせた数
+  const motoCount = {}; let motoAll = 0;
+  DATA.sitesX.forEach(s => { if (!visible(s, true)) return; motoAll++; motoCount[s['元請']] = (motoCount[s['元請']] || 0) + 1; });
+  const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}</button>${Object.keys(motoCount).sort((a, b) => a.localeCompare(b, 'ja')).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}</button>`).join('')}</div>`;
+  $('#listpage').innerHTML = motobar + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
     `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th></tr></thead><tbody>${rows}</tbody></table>`;
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
+  $('#listpage').querySelectorAll('.motobar button').forEach(el => el.onclick = () => { motoF = el.dataset.m; $('#moto').value = motoF; render(); });
   $('#listpage').querySelectorAll('th[data-k]').forEach(el => el.onclick = () => { if (sortKey === el.dataset.k) sortAsc = !sortAsc; else { sortKey = el.dataset.k; sortAsc = true; } renderList(); });
 }
 function showTab(t) {
@@ -286,7 +299,7 @@ function openSite(name) {
   const s = DATA.sitesX.find(x => x['現場名'] === name); if (!s) return;
   curSite = name;
   $('#s_title').innerHTML = `${esc(s['現場名'])}<small>${esc(s['元請'])}${s['職人'] ? ' ／ ' + esc(s['職人']) : ''}</small>`;
-  const ex = s.ex, flags = FLAGS.map(f => `<span class="${s[f] === '〇' ? 'on' : ''}">${f}${s[f] === '／' ? '／' : ''}</span>`).join('');
+  const ex = s.ex, flags = flagSpans(s);
   const dueTxt = s.due ? (s.dueExact ? fmtDT(ex['消検日']) + '（消検日）' : s.due.slice(0, 7).replace('-', '/') + '（消検月）') : '未定';
   // 写真は lh3 の直リンクで出す（drive.google.com の閲覧画面だとログインを求められる）
   const img = (id, w) => `https://lh3.googleusercontent.com/d/${encodeURIComponent(id)}=w${w}`;
@@ -294,7 +307,7 @@ function openSite(name) {
   $('#s_body').innerHTML = `
   <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${s.days != null ? (s.days < 0 ? '' : `あと${s.days}日`) : ''}</span><a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}">Googleマップ ›</a></div>
     <div class="kv" style="margin-top:8px"><b>完成</b><span>${dueTxt}</span><b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${fireFor(s['住所']) ? `<b>所轄</b><span>${fireFor(s['住所']).name}（<a href="tel:${fireFor(s['住所']).tel}">${fireFor(s['住所']).tel}</a>）</span>` : ''}${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
-    <div class="flags" style="margin-top:8px">${flags}${ex['搬入'] ? '<span class="on">搬入</span>' : '<span>搬入</span>'}</div></div>
+    <div class="flags" id="flags" style="margin-top:8px">${flags}</div><div class="gps" style="margin-top:3px">タップで 空→〇→／→△ と切り替わります（青枠＝アプリで変えたもの）</div></div>
   <div class="row" style="gap:6px">${s['手入力'] ? '<span class="tag">アプリで追加</span><button class="btn sub sm" id="x_edit">編集</button><button class="btn sub sm danger" id="x_del">削除</button>' : ''}<button class="btn sub sm" id="x_loc">${s.lat == null ? '位置を設定' : '位置を直す'}</button></div>
   <div class="sec"><h3>訪問を記録</h3>
     <div class="row"><label>建物の進捗</label><select class="f" id="v_stage"><option value="">選択</option>${STAGES.map(x => `<option>${x}</option>`).join('')}</select></div>
@@ -313,6 +326,7 @@ function openSite(name) {
   $('#sheet').classList.add('open');
   $('#v_send').onclick = () => sendVisit(s);
   $('#x_loc').onclick = () => openForm('loc', s);
+  bindFlags(s);
   if (s['手入力']) { $('#x_edit').onclick = () => openForm('edit', s); $('#x_del').onclick = () => delSite(s); }
   $('#s_body').querySelectorAll('button.del').forEach(b => b.onclick = () => delVisit(s, s.visits[+b.dataset.i]));
   $('#e_save').onclick = () => saveExtra(s);
@@ -348,6 +362,31 @@ async function saveExtra(s) {
     toast('保存しました'); await load(true);
   } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
 }
+// ===== 図面〜下検査の切り替え =====
+const FLAG_CYCLE = ['', '〇', '／', '△'];
+function flagSpans(s) {
+  const cls = { '〇': 'on', '／': 'na', '△': 'tri' };
+  return FLAGS.map(f => { const v = normF(s[f]); return `<span class="tap ${cls[v] || ''}${s['アプリ_' + f] ? ' app' : ''}" data-f="${f}">${f}${v}</span>`; }).join('') +
+    `<span class="${s.ex['搬入'] ? 'on' : ''}">搬入</span>`;
+}
+const flagTimers = {};
+function bindFlags(s) {
+  $('#flags').querySelectorAll('span.tap').forEach(el => el.onclick = () => {
+    const f = el.dataset.f;
+    if (!(('元_' + f) in s)) s['元_' + f] = String(s[f] || ''); // Excelの値（最初の1回だけ控える）
+    const nx = FLAG_CYCLE[(FLAG_CYCLE.indexOf(normF(s[f])) + 1) % FLAG_CYCLE.length];
+    s[f] = nx; s['アプリ_' + f] = nx !== s['元_' + f] ? 1 : 0;
+    // 元データ（DATA.sites）にも反映して、一覧や再描画で戻らないようにする
+    const raw = DATA.sites.find(x => x['現場名'] === s['現場名']); if (raw) { raw[f] = nx; raw['元_' + f] = s['元_' + f]; raw['アプリ_' + f] = s['アプリ_' + f]; }
+    $('#flags').innerHTML = flagSpans(s); bindFlags(s);
+    // 続けてタップしても最後の値だけ送る
+    const key = s['現場名'] + '|' + f; clearTimeout(flagTimers[key]);
+    flagTimers[key] = setTimeout(() => post({ action: 'setFlag', site: s['現場名'], key: f, value: nx, base: s['元_' + f] })
+      .then(() => { store.set('cache', JSON.stringify(DATA)); toast(`${f}：${nx || '空欄'} を保存しました`); renderList(); })
+      .catch(e => toast('保存失敗：' + e.message)), 800);
+  });
+}
+
 // ===== 物件の追加・編集・位置 =====
 // draft: 入力途中の内容。地図タップで位置を選ぶあいだ、フォームを閉じても残す
 let draft = null;
@@ -388,7 +427,7 @@ function openForm(mode, s) {
     d.lat = myPos.lat; d.lng = myPos.lng; d.how = '現在地'; openForm(mode, s);
   };
   $('#f_pick').onclick = () => {
-    keep(); $('#sheet').classList.remove('open'); toast('地図をタップして位置を決めてください');
+    keep(); showTab('map'); $('#sheet').classList.remove('open'); toast('地図をタップして位置を決めてください');
     map.getContainer().style.cursor = 'crosshair';
     map.once('click', e => { map.getContainer().style.cursor = ''; d.lat = e.latlng.lat; d.lng = e.latlng.lng; d.how = '地図で指定'; openForm(mode, s); });
   };

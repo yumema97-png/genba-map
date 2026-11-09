@@ -27,6 +27,12 @@ const EXTRA_COLS = ['現場名', '消検日', '建築確認検査日', '搬入',
 const VISIT_COLS = ['日時', '記録者', '現場名', '建物進捗', 'メモ', '写真', '緯度', '経度', '距離m'];
 // アプリで追加した物件。Excel取り込みは触らない。同じ現場名がExcelに載ったらExcel側を出す
 const MANUAL_SHEET = '物件手入力';
+// 図面〜下検査の○／△をアプリで切り替えた記録。「元の値」はそのときのExcelの値。
+// Excelがその後も同じ値ならアプリの値を出す。Excel側が変わったらExcelを優先（新しいほうが勝つ）
+const FLAG_SHEET = 'フラグ変更';
+const FLAG_COLS = ['現場名', '項目', '値', '元の値', '日時', '更新者'];
+const FLAG_KEYS = ['図面', 'ELV', '見積', '受注', '発注', '着工', '設置', '下検査'];
+const FLAG_VALUES = ['', '〇', '／', '△'];
 const MANUAL_COLS = ['現場名', '元請', '職人', '消検月', '注意点', '住所', '緯度', '経度', '登録日時', '登録者', '更新日時', '更新者'];
 const PHOTO_FOLDER = '現場写真';
 
@@ -100,6 +106,7 @@ function doPost(e) {
     if (body.action === 'updateSite') return json(updateSite(body));
     if (body.action === 'deleteSite') return json(deleteSite(body));
     if (body.action === 'setLocation') return json(setLocation(body));
+    if (body.action === 'setFlag') return json(setFlag(body));
     return json({ ok: false, error: 'unknown action' });
   } finally {
     lock.releaseLock();
@@ -125,7 +132,55 @@ function allSites() {
   const names = new Set(xs.map(s => s['現場名']));
   manualSheet();
   const ms = readSheet(MANUAL_SHEET).filter(m => !names.has(m['現場名'])).map(m => ({ ...m, '手入力': 1, '要確認': m['緯度'] === '' ? '位置未設定' : '' }));
-  return xs.concat(ms);
+  const all = xs.concat(ms), by = {};
+  all.forEach(s => (by[s['現場名']] = s));
+  flagSheet();
+  readSheet(FLAG_SHEET).forEach(f => {
+    const s = by[f['現場名']], k = f['項目'];
+    if (!s || FLAG_KEYS.indexOf(k) < 0) return;
+    if (String(s[k] || '') !== String(f['元の値'] || '')) return; // Excel側が変わった
+    s['元_' + k] = String(s[k] || '');
+    s[k] = String(f['値'] || '');
+    s['アプリ_' + k] = 1;
+  });
+  return all;
+}
+
+function flagSheet() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(FLAG_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(FLAG_SHEET);
+    sh.getRange(1, 1, 1, FLAG_COLS.length).setValues([FLAG_COLS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// 1つの項目を切り替える。base は画面に出ていた元の値（Excelの値）
+function setFlag(b) {
+  if (FLAG_KEYS.indexOf(b.key) < 0 || FLAG_VALUES.indexOf(b.value) < 0) return { ok: false, error: '項目か値が不正です' };
+  const sh = flagSheet(), v = sh.getDataRange().getValues();
+  const row = [b.site, b.key, b.value, String(b.base || ''), new Date(), b.user || ''];
+  for (let i = 1; i < v.length; i++) {
+    if (v[i][0] === b.site && v[i][1] === b.key) {
+      if (b.value === String(b.base || '')) sh.deleteRow(i + 1); // Excelと同じ値に戻したら記録は要らない
+      else sh.getRange(i + 1, 1, 1, row.length).setValues([row]);
+      return { ok: true };
+    }
+  }
+  if (b.value !== String(b.base || '')) sh.appendRow(row);
+  return { ok: true };
+}
+
+// 取り込み後、Excel側で変わった項目のアプリ記録を消す（古い記録が後で生き返らないように）
+function pruneFlags_() {
+  const sh = flagSheet(), v = sh.getDataRange().getValues();
+  const xs = {}; readSheet(SHEETS.sites).forEach(s => (xs[s['現場名']] = s));
+  for (let i = v.length - 1; i >= 1; i--) {
+    const s = xs[v[i][0]];
+    if (s && String(s[v[i][1]] || '') !== String(v[i][3] || '')) sh.deleteRow(i + 1);
+  }
 }
 
 function findRow(sh, name) {
@@ -345,6 +400,7 @@ function importFromExcel() {
   sitesSh.getRange(2, SITE_COLS.indexOf('消検月') + 1, Math.max(rows.length, 1), 1).setNumberFormat('@');
   sitesSh.getRange(1, 1, 1, SITE_COLS.length).setValues([SITE_COLS]).setFontWeight('bold');
   sitesSh.getRange(2, 1, rows.length, SITE_COLS.length).setValues(rows);
+  pruneFlags_();
   return rows.length;
 }
 
