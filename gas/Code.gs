@@ -123,6 +123,53 @@ function workerSites_(worker) {
 }
 // 職人ができる操作
 const WORKER_ACTIONS = ['visit', 'deleteVisit', 'getDrawing'];
+// 会議用（管理者）だけができる操作：職人とパスワードの管理
+const ADMIN_ACTIONS = ['listAccounts', 'saveAccount', 'deleteAccount', 'setSharedPw'];
+
+// ---------- 管理（会議用パスワードのときだけ） ----------
+function listAccounts() {
+  return { ok: true, accounts: accounts_().map(a => ({ name: a.name, pw: a.pw, worker: a.worker })), normalPw: cfg('パスワード'), meetingPw: cfg('会議用パスワード') };
+}
+// 使えるパスワードか（短すぎ・ほかの人と同じ はだめ）
+function pwProblem_(pw, exceptName) {
+  if (!pw) return '';
+  if (pw.length < 6) return 'パスワードは6文字以上にしてください';
+  if (pw === cfg('パスワード') || pw === cfg('会議用パスワード')) return '普段用・会議用と同じパスワードは使えません';
+  if (accounts_().some(a => a.pw === pw && a.name !== exceptName)) return 'ほかの職人と同じパスワードです';
+  return '';
+}
+// 職人を追加・変更。oldName があれば変更（名前の付け替えも可）。パスワードが空ならログインはできない（候補に出るだけ）
+function saveAccount(b) {
+  const name = clean(b.name), pw = clean(b.pw), worker = clean(b.worker) || name, oldName = clean(b.oldName);
+  if (!name) return { ok: false, error: '名前を入れてください' };
+  const p = pwProblem_(pw, oldName || name); if (p) return { ok: false, error: p };
+  const sh = accountSheet_(), v = sh.getDataRange().getValues();
+  let r = 0;
+  for (let i = 1; i < v.length; i++) {
+    if (v[i][0] === (oldName || name)) r = i + 1;
+    else if (v[i][0] === name) return { ok: false, error: '同じ名前の職人がいます' };
+  }
+  const row = [txt(name), txt(pw), txt(worker), txt(r ? v[r - 1][3] : b.memo)];
+  if (r) sh.getRange(r, 1, 1, row.length).setValues([row]); else sh.appendRow(row);
+  return { ok: true };
+}
+function deleteAccount(b) {
+  const sh = accountSheet_(), r = findRow(sh, clean(b.name));
+  if (!r) return { ok: false, error: '見つかりません' };
+  sh.deleteRow(r);
+  return { ok: true };
+}
+// 普段用・会議用のパスワードを変える
+function setSharedPw(b) {
+  const pw = clean(b.pw), key = b.kind === 'meeting' ? '会議用パスワード' : 'パスワード';
+  if (pw.length < 6) return { ok: false, error: 'パスワードは6文字以上にしてください' };
+  const other = b.kind === 'meeting' ? cfg('パスワード') : cfg('会議用パスワード');
+  if (pw === other || accounts_().some(a => a.pw === pw)) return { ok: false, error: 'ほかのパスワードと同じです' };
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.config), v = sh.getDataRange().getValues();
+  for (let i = 0; i < v.length; i++) if (v[i][0] === key) { sh.getRange(i + 1, 2).setValue(txt(pw)); return { ok: true }; }
+  sh.appendRow([key, txt(pw)]);
+  return { ok: true };
+}
 
 function AMOUNT_SHEET_() {
   const ss = SpreadsheetApp.getActive();
@@ -153,6 +200,8 @@ function doGet(e) {
     ok: true,
     role,
     me: role === 'worker' ? a.name : undefined,
+    // 職人の候補（名前だけ。パスワードは返さない）。物件の職人欄に無い新しい人もプルダウンに出す
+    staff: role === 'worker' ? undefined : accounts_().map(x => x.worker || x.name),
     amounts: role === 'meeting' ? amountsWithEdits_() : undefined,
     sites, extra, visits, drawings,
     users: role === 'worker' ? [a.name] : cfg('記録者').split(',').map(s => s.trim()).filter(Boolean),
@@ -171,6 +220,11 @@ function doPost(e) {
   if (!who.role) return json({ ok: false, error: 'パスワードが違います' });
   // 金額を書けるのは会議用で入ったときだけ（普段用には金額を見せていないので、書かせもしない）
   if (who.role !== 'meeting' && body.fields) delete body.fields['金額'];
+  // 職人・パスワードの管理は会議用だけ
+  if (ADMIN_ACTIONS.indexOf(body.action) >= 0) {
+    if (who.role !== 'meeting') return json({ ok: false, error: '会議用パスワードで入ったときだけ使えます' });
+    if (body.action === 'listAccounts') return json(listAccounts());
+  }
   if (who.role === 'worker') {
     // 職人：できる操作と物件を絞る。記録者は本人の名前に固定（なりすまし防止）
     if (WORKER_ACTIONS.indexOf(body.action) < 0) return json({ ok: false, error: 'この操作はできません（業務部に頼んでください）' });
@@ -198,6 +252,9 @@ function doPost(e) {
     if (body.action === 'setLocation') return json(setLocation(body));
     if (body.action === 'setFlag') return json(setFlag(body));
     if (body.action === 'editSite') return json(editSite(body));
+    if (body.action === 'saveAccount') return json(saveAccount(body));
+    if (body.action === 'deleteAccount') return json(deleteAccount(body));
+    if (body.action === 'setSharedPw') return json(setSharedPw(body));
     if (body.action === 'addDrawing') return json(addDrawingRow_(body));
     if (body.action === 'deleteDrawing') return json(deleteDrawing(body));
     return json({ ok: false, error: 'unknown action' });

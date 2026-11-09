@@ -55,6 +55,10 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .motobar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
 .motobar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 body.meet header .chip[data-c],body.meet #unvisited{display:none}
+#admin{display:none}body.meet #admin{display:inline-flex}
+.adm{width:100%;border-collapse:collapse;font-size:13px}.adm th,.adm td{border-bottom:1px solid var(--line);padding:6px 4px;text-align:left}
+.adm input{border:1px solid var(--line);border-radius:6px;padding:5px 7px;width:100%;font-family:ui-monospace,Consolas,monospace}
+.adm td.b{white-space:nowrap;text-align:right}
 /* 職人のアカウント：見る＋訪問記録だけ。追加・編集・位置・図面の保存/削除・物件情報の保存は出さない */
 body.worker #addsite,body.worker #x_loc,body.worker #x_edit,body.worker #x_del,body.worker #dwdrop,body.worker .dwdel,body.worker #e_save,body.worker button.clr,body.worker #worker,body.worker .flagnote{display:none!important}
 body.worker .flags span.tap{cursor:default}
@@ -214,6 +218,7 @@ small.sub{display:block;font-size:11px;color:var(--muted);font-weight:400}
   <input type="search" id="q" placeholder="現場名・正式名称で検索">
   <span class="chip" id="addsite">＋物件</span>
   <span class="chip" id="reload">更新</span>
+  <span class="chip" id="admin" title="職人とパスワードの管理（会議用パスワードのときだけ）">⚙管理</span>
   <span class="chip" id="who" title="記録者を切り替える"></span>
 </header>
 <div id="map"></div>
@@ -350,6 +355,7 @@ function build() {
   MOTO_ORDER = [...motos].filter(Boolean); // 物件シートの並び＝Excelのシートの順（アプリで追加した物件の新しい元請は最後）
   if (motoF && !MOTO_ORDER.includes(motoF)) motoF = '';
   const sel = $('#moto'); sel.innerHTML = '<option value="">元請：全部</option>' + MOTO_ORDER.map(m => `<option>${esc(m)}</option>`).join(''); sel.value = motoF;
+  (DATA.staff || []).forEach(w => w && workers.add(w)); // 管理で追加した職人（まだ物件に名前が無い人）も候補に
   const ws = [...workers].sort((a, b) => a.localeCompare(b, 'ja'));
   if (workerF && !ws.includes(workerF)) workerF = '';
   const wsel = $('#worker'); wsel.innerHTML = '<option value="">職人：全員</option>' + ws.map(w => `<option>${esc(w)}</option>`).join(''); wsel.value = workerF;
@@ -383,8 +389,9 @@ function render() {
     const cls = ['pin', s.cat === '未定' ? 'non' : '', s.visits.length ? 'visited' : '', s.dueExact ? 'flag' : ''].join(' ');
     // 消検日が日付で決まっている現場は、ピンの横に「消検 11/10」の札を付ける
     // 消検が済んで建確が控えているときは「建確 11/20」
-    const md = v => `${+dPart(v).slice(5, 7)}/${+dPart(v).slice(8, 10)}`;
-    const tag = s.phase === '建確' ? `<span class="ptag b">建確 ${md(s.ex['建築確認検査日'])}</span>` : s.dueExact && s.days >= 0 ? `<span class="ptag">消検 ${md(s.due)}</span>` : '';
+    // 日付＋時刻（時刻が入っていれば）。例「建確 11/20 10:00」
+    const md = v => `${+dPart(v).slice(5, 7)}/${+dPart(v).slice(8, 10)}${tPart(v) ? ' ' + tPart(v) : ''}`;
+    const tag = s.phase === '建確' ? `<span class="ptag b">建確 ${md(s.ex['建築確認検査日'])}</span>` : s.dueExact && s.days >= 0 ? `<span class="ptag">消検 ${md(s.ex['消検日'])}</span>` : '';
     const icon = L.divIcon({ className: 'pwrap', html: `<div class="${cls}" style="background:${COL[s.cat]}"></div>${tag}`, iconSize: [18, 18], iconAnchor: [9, 18] });
     const m = L.marker([s.lat, s.lng], { icon }).on('click', () => openSite(s['現場名']));
     m.bindTooltip(esc(s.alias || s['現場名']), { direction: 'top', offset: [0, -16] }); // 名前は必ずエスケープ（HTMLとして解釈させない）
@@ -672,7 +679,7 @@ function openForm(mode, s) {
   // プルダウンの候補：元請・職人は今のデータから、消検月は今年度の4月から2年先まで
   const uniq = a => [...new Set(a.filter(Boolean))].sort((x, y) => x.localeCompare(y, 'ja'));
   const motos = MOTO_ORDER.filter(m => m !== '（元請なし）'); // Excelのシート順
-  const workers = uniq(DATA.sitesX.flatMap(x => String(x['職人'] || '').split(/[、,，・\s]+/)));
+  const workers = uniq(DATA.sitesX.flatMap(x => String(x['職人'] || '').split(/[、,，・\s]+/)).concat(DATA.staff || []));
   const now = new Date(), y0 = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
   const months = []; for (let i = 0; i < 36; i++) { const d = new Date(y0, 3 + i, 1); if (d > new Date(now.getFullYear() + 2, now.getMonth(), 1)) break; months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); }
   const [w1 = '', w2 = ''] = String(d.worker || '').split(/[、,，・\s]+/);
@@ -758,6 +765,45 @@ function openForm(mode, s) {
     } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
   };
 }
+// ===== 管理（会議用パスワードのときだけ）：職人の追加・パスワード =====
+const genPw = () => { const c = 'abcdefghjkmnpqrstuvwxyz23456789', a = new Uint32Array(8); crypto.getRandomValues(a); return [...a].map(x => c[x % c.length]).join(''); };
+async function openAdmin() {
+  flushFlags(); cancelPick(); curSite = null;
+  $('#s_title').innerHTML = '管理<small>職人とパスワード（会議用で入ったときだけ）</small>';
+  $('#s_body').innerHTML = '<div class="sec">読み込み中…</div>'; $('#sheet').classList.add('open');
+  let j; try { j = await post({ action: 'listAccounts' }); } catch (e) { $('#s_body').innerHTML = `<div class="sec">${esc(e.message)}</div>`; return; }
+  const row = a => `<tr data-n="${esc(a.name)}"><td><input class="a_name" value="${esc(a.name)}"></td><td><input class="a_pw" value="${esc(a.pw)}"></td><td><input class="a_w" value="${esc(a.worker)}"></td>
+    <td class="b"><button class="btn sub sm a_gen">作る</button> <button class="btn sm a_save">保存</button> <button class="del a_del">削除</button></td></tr>`;
+  $('#s_body').innerHTML = `
+  <div class="sec"><h3>職人（${j.accounts.length}人）</h3>
+    <table class="adm"><thead><tr><th>名前</th><th>パスワード</th><th>担当名</th><th></th></tr></thead><tbody>${j.accounts.map(row).join('')}</tbody></table>
+    <div class="gps" style="margin-top:6px">担当名＝Excel・物件の「職人」欄に書く名前（その名前の物件だけが見えます）。パスワードを空にすると、ログインはできず職人の候補にだけ出ます。「作る」でパスワードを自動で作ります（保存を押すまで変わりません）</div></div>
+  <div class="sec"><h3>職人を追加</h3>
+    <table class="adm"><tbody><tr><td><input id="n_name" placeholder="名前（例：阿部）"></td><td><input id="n_pw" placeholder="パスワード"></td><td><input id="n_w" placeholder="担当名（空なら名前）"></td>
+    <td class="b"><button class="btn sub sm" id="n_gen">作る</button> <button class="btn sm" id="n_add">追加</button></td></tr></tbody></table></div>
+  <div class="sec"><h3>共通のパスワード</h3>
+    <table class="adm"><tbody>
+    <tr><td style="width:7em">普段用</td><td><input id="p_normal" value="${esc(j.normalPw)}"></td><td class="b"><button class="btn sm" id="p_normal_s">変更</button></td></tr>
+    <tr><td>会議用</td><td><input id="p_meeting" value="${esc(j.meetingPw)}"></td><td class="b"><button class="btn sm" id="p_meeting_s">変更</button></td></tr></tbody></table>
+    <div class="gps">普段用を変えると、小松さん・徳田さんなど普段用で入っている人は次に開いたとき入り直しになります。会議用を変えると、この端末は新しいパスワードで入り直します</div></div>`;
+  const run = async (body, msg) => { try { await post(body); toast(msg); await load(true); openAdmin(); } catch (e) { toast(e.message); } };
+  $('#s_body').querySelectorAll('tr[data-n]').forEach(tr => {
+    const v = c => tr.querySelector(c).value.trim();
+    tr.querySelector('.a_gen').onclick = () => { tr.querySelector('.a_pw').value = genPw(); };
+    tr.querySelector('.a_save').onclick = () => run({ action: 'saveAccount', oldName: tr.dataset.n, name: v('.a_name'), pw: v('.a_pw'), worker: v('.a_w') }, '保存しました');
+    tr.querySelector('.a_del').onclick = () => { if (confirm(`職人「${tr.dataset.n}」を削除します（ログインできなくなります。物件や訪問記録は消えません）。よろしいですか？`)) run({ action: 'deleteAccount', name: tr.dataset.n }, '削除しました'); };
+  });
+  $('#n_gen').onclick = () => { $('#n_pw').value = genPw(); };
+  $('#n_add').onclick = () => run({ action: 'saveAccount', name: $('#n_name').value.trim(), pw: $('#n_pw').value.trim(), worker: $('#n_w').value.trim() }, '追加しました');
+  const shared = kind => async () => {
+    const pw = $('#p_' + kind).value.trim();
+    if (!confirm(`${kind === 'meeting' ? '会議用' : '普段用'}のパスワードを「${pw}」に変えます。よろしいですか？`)) return;
+    try { await post({ action: 'setSharedPw', kind, pw }); if (kind === 'meeting') store.set('pw', pw); toast('変更しました'); await load(true); openAdmin(); } catch (e) { toast(e.message); }
+  };
+  $('#p_normal_s').onclick = shared('normal'); $('#p_meeting_s').onclick = shared('meeting');
+}
+$('#admin').onclick = openAdmin;
+
 // フォームの切り替えボタン（図面〜搬入）
 function formFlags(d) {
   return FLAGS.concat('搬入').map(f => { const v = d.flags[f] || ''; const changed = d.init && v !== d.init.flags[f]; return `<span class="tap ${FLAG_CLS[v] || ''}${changed ? ' app' : ''}" data-f="${f}">${f}${esc(v)}</span>`; }).join('');
