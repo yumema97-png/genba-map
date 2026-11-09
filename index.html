@@ -357,20 +357,31 @@ function openForm(mode, s) {
   }
   const d = draft, full = mode !== 'loc';
   curSite = null;
-  const motos = [...new Set(DATA.sitesX.map(x => x['元請']).filter(Boolean))];
+  // プルダウンの候補：元請・職人は今のデータから、消検月は今年度の4月から2年先まで
+  const uniq = a => [...new Set(a.filter(Boolean))].sort((x, y) => x.localeCompare(y, 'ja'));
+  const motos = uniq(DATA.sitesX.map(x => x['元請']));
+  const workers = uniq(DATA.sitesX.flatMap(x => String(x['職人'] || '').split(/[、,，・\s]+/)));
+  const now = new Date(), y0 = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+  const months = []; for (let i = 0; i < 36; i++) { const d = new Date(y0, 3 + i, 1); if (d > new Date(now.getFullYear() + 2, now.getMonth(), 1)) break; months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); }
+  const [w1 = '', w2 = ''] = String(d.worker || '').split(/[、,，・\s]+/);
+  const opts = (list, cur, blank) => { const l = cur && !list.includes(cur) ? [cur, ...list] : list; return `<option value="">${blank}</option>` + l.map(v => `<option${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join(''); };
+  const mopts = cur => `<option value="">未定</option>` + (cur && !months.includes(cur) ? [cur, ...months] : months).map(v => `<option value="${v}"${v === cur ? ' selected' : ''}>${v.slice(0, 4)}年${+v.slice(5)}月</option>`).join('');
   $('#s_title').innerHTML = { add: '物件を追加', edit: '物件を編集', loc: '位置を直す' }[mode] + (mode !== 'add' ? `<small>${esc(d.site)}</small>` : '');
   $('#s_body').innerHTML = `<div class="sec">
     ${mode === 'add' ? `<label class="fl2">現場名（必須）<input class="f" id="f_name" value="${esc(d.name)}" placeholder="例：北2西22MS"></label>` : ''}
-    ${full ? `<label class="fl2">元請<input class="f" id="f_moto" list="motolist" value="${esc(d.moto)}"><datalist id="motolist">${motos.map(m => `<option value="${esc(m)}">`).join('')}</datalist></label>
-    <label class="fl2">職人<input class="f" id="f_worker" value="${esc(d.worker)}"></label>
-    <label class="fl2">消検月<input class="f" type="month" id="f_ym" value="${esc(d.ym)}"></label>
+    ${full ? `<label class="fl2">元請<select class="f" id="f_moto">${opts(motos, d.moto, '選んでください')}</select></label>
+    <label class="fl2">職人<span class="row" style="flex-wrap:nowrap"><select class="f" id="f_w1">${opts(workers, w1, '選んでください')}</select><select class="f" id="f_w2">${opts(workers, w2, '（2人目なし）')}</select></span></label>
+    <label class="fl2">消検月<select class="f" id="f_ym">${mopts(d.ym)}</select></label>
     <label class="fl2">注意点<textarea id="f_note">${esc(d.note)}</textarea></label>` : ''}
     <label class="fl2">住所<input class="f" id="f_addr" value="${esc(d.addr)}" placeholder="例：札幌市中央区北2条西22丁目（空なら現場名から推定）"></label>
     <div class="row"><button class="btn sub sm" id="f_here">現在地にする</button><button class="btn sub sm" id="f_pick">地図をタップして決める</button></div>
     <div class="gps" id="f_pos">${d.lat != null ? `位置：${d.how}（${(+d.lat).toFixed(5)}, ${(+d.lng).toFixed(5)}）<a href="#" id="f_clr">取り消す</a>` : '位置：住所から自動で決めます'}</div>
     <div class="row" style="justify-content:flex-end"><button class="btn sub" id="f_cancel">やめる</button><button class="btn" id="f_save">${mode === 'add' ? '追加する' : '保存'}</button></div></div>`;
   $('#sheet').classList.add('open');
-  const keep = () => { ['name', 'moto', 'worker', 'ym', 'note', 'addr'].forEach(k => { const el = $('#f_' + k); if (el) d[k] = el.value; }); };
+  const keep = () => {
+    ['name', 'moto', 'ym', 'note', 'addr'].forEach(k => { const el = $('#f_' + k); if (el) d[k] = el.value; });
+    if ($('#f_w1')) d.worker = [...new Set([$('#f_w1').value, $('#f_w2').value].filter(Boolean))].join('、');
+  };
   $('#f_here').onclick = () => {
     keep();
     if (!myPos) { toast('位置情報がまだ取れていません'); return; }
