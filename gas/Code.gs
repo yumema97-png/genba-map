@@ -84,13 +84,45 @@ function cfg(key) {
   return '';
 }
 
-// 普段のパスワード → 'normal'、会議用パスワード（設定シート、空欄なら無効）→ 'meeting'
-function roleOf(pw) {
-  if (!pw) return '';
+// 普段のパスワード → 'normal'、会議用パスワード（設定シート、空欄なら無効）→ 'meeting'、
+// 職人の個人パスワード（アカウントシート）→ 'worker'
+function roleOf(pw) { return auth_(pw).role; }
+function auth_(pw) {
+  if (!pw) return { role: '' };
   const m = cfg('会議用パスワード');
-  if (m && pw === m) return 'meeting';
-  return pw === cfg('パスワード') ? 'normal' : '';
+  if (m && pw === m) return { role: 'meeting' };
+  if (pw === cfg('パスワード')) return { role: 'normal' };
+  const a = accounts_().find(x => x.pw && x.pw === pw);
+  if (a) return { role: 'worker', name: a.name, worker: a.worker || a.name };
+  return { role: '' };
 }
+
+// ---------- 職人のアカウント（2026-11-09〜） ----------
+// アカウントシート：名前・パスワード・担当名（Excelの職人欄に出てくる名前）・メモ
+// 職人で入ると、職人欄に担当名がある物件だけを返す。金額は返さない。書けるのは訪問記録（本人名）だけ
+const ACCOUNT_SHEET = 'アカウント';
+const ACCOUNT_COLS = ['名前', 'パスワード', '担当名', 'メモ'];
+function accountSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(ACCOUNT_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(ACCOUNT_SHEET);
+    sh.getRange(1, 1, 1, ACCOUNT_COLS.length).setValues([ACCOUNT_COLS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.getRange('B:B').setNumberFormat('@');
+  }
+  return sh;
+}
+function accounts_() {
+  return readSheet(accountSheet_().getName()).map(r => ({ name: clean(r['名前']), pw: clean(r['パスワード']), worker: clean(r['担当名']) })).filter(a => a.name);
+}
+const splitW_ = v => String(v || '').split(/[、,，・\s]+/).filter(Boolean);
+// 職人が見てよい現場名の集合
+function workerSites_(worker) {
+  return new Set(allSites().filter(s => splitW_(s['職人']).indexOf(worker) >= 0).map(s => s['現場名']));
+}
+// 職人ができる操作
+const WORKER_ACTIONS = ['visit', 'deleteVisit', 'getDrawing'];
 
 function AMOUNT_SHEET_() {
   const ss = SpreadsheetApp.getActive();
@@ -108,17 +140,22 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   // 記録者の名前だけはパスワードなしで返す（ログイン画面で最初から選べるように。2026-11-09 Yoko 了承）
   if (p.mode === 'users') return json({ ok: true, users: cfg('記録者').split(',').map(s => s.trim()).filter(Boolean) });
-  const role = roleOf(p.pw);
+  const a = auth_(p.pw), role = a.role;
   if (!role) return json({ ok: false, error: 'パスワードが違います' });
+  let sites = allSites(), extra = readSheet(SHEETS.extra), visits = readSheet(SHEETS.visits), drawings = readSheet(drawSheet_().getName());
+  if (role === 'worker') {
+    // 担当の物件だけ。ほかの物件の情報は送らない
+    const mine = new Set(sites.filter(s => splitW_(s['職人']).indexOf(a.worker) >= 0).map(s => s['現場名']));
+    const only = r => mine.has(r['現場名']);
+    sites = sites.filter(only); extra = extra.filter(only); visits = visits.filter(only); drawings = drawings.filter(only);
+  }
   return json({
     ok: true,
     role,
+    me: role === 'worker' ? a.name : undefined,
     amounts: role === 'meeting' ? readSheet(AMOUNT_SHEET_()) : undefined,
-    sites: allSites(),
-    extra: readSheet(SHEETS.extra),
-    visits: readSheet(SHEETS.visits),
-    drawings: readSheet(drawSheet_().getName()),
-    users: cfg('記録者').split(',').map(s => s.trim()).filter(Boolean),
+    sites, extra, visits, drawings,
+    users: role === 'worker' ? [a.name] : cfg('記録者').split(',').map(s => s.trim()).filter(Boolean),
     radius: Number(cfg('現地判定m')) || 300,
     updated: new Date().toISOString(),
     // 画面上部に出す「Excel取り込み」日時と、そのときのExcelの更新日時
@@ -130,7 +167,18 @@ function doGet(e) {
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json({ ok: false, error: 'bad json' }); }
-  if (!roleOf(body.pw)) return json({ ok: false, error: 'パスワードが違います' });
+  const who = auth_(body.pw);
+  if (!who.role) return json({ ok: false, error: 'パスワードが違います' });
+  if (who.role === 'worker') {
+    // 職人：できる操作と物件を絞る。記録者は本人の名前に固定（なりすまし防止）
+    if (WORKER_ACTIONS.indexOf(body.action) < 0) return json({ ok: false, error: 'この操作はできません（業務部に頼んでください）' });
+    body.user = who.name;
+    if (body.action === 'getDrawing') {
+      const row = readSheet(drawSheet_().getName()).find(r => r['ファイルID'] === body.id);
+      if (!row || !workerSites_(who.worker).has(row['現場名'])) return json({ ok: false, error: '図面が見つかりません' });
+    } else if (!workerSites_(who.worker).has(body.site)) return json({ ok: false, error: '担当の物件ではありません' });
+    if (body.action === 'deleteVisit' && body.by !== who.name) return json({ ok: false, error: '自分の記録だけ削除できます' });
+  }
   // 図面を開く（読むだけなのでロック不要）
   if (body.action === 'getDrawing') return json(getDrawing(body));
   // 写真・図面のドライブ保存は時間がかかるので、ロックを取る前に済ませる（他の人の保存を待たせない）

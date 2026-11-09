@@ -55,6 +55,9 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .motobar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
 .motobar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 body.meet header .chip[data-c],body.meet #unvisited{display:none}
+/* 職人のアカウント：見る＋訪問記録だけ。追加・編集・位置・図面の保存/削除・物件情報の保存は出さない */
+body.worker #addsite,body.worker #x_loc,body.worker #x_edit,body.worker #x_del,body.worker #dwdrop,body.worker .dwdel,body.worker #e_save,body.worker button.clr,body.worker #worker,body.worker .flagnote{display:none!important}
+body.worker .flags span.tap{cursor:default}
 /* 会議用は会議室の画面で見るので大きく（印刷は下の @media print のまま） */
 @media screen{
   body.meet .motobar button{font-size:16px;padding:7px 14px}
@@ -189,6 +192,7 @@ small.sub{display:block;font-size:11px;color:var(--muted);font-weight:400}
   <h2>現場マップ</h2>
   <label>パスワード<input id="l_pw" class="f" type="password" autocomplete="current-password"></label>
   <label>記録者<select id="l_user" class="f"></select></label>
+  <div style="font-size:11px;color:var(--muted)">個人のパスワードを持っている人は、記録者は自動で決まります</div>
   <button class="btn" type="submit">開く</button>
   <div id="l_msg" style="color:var(--red);font-size:12px"></div>
 </form></div>
@@ -281,8 +285,9 @@ function dist(a, b) { const R = 6371000, toR = x => x * Math.PI / 180; const dLa
 // ===== データ =====
 // 端末に残すキャッシュには金額を入れない（会議用PC以外に残らないように）
 // sitesX（表示用に作った物件。会議用だと各物件に amount が入る）も外す
-const saveCache = () => { const { amounts, role, sitesX, ...rest } = DATA; store.set('cache', JSON.stringify(rest)); };
+const saveCache = () => { const { amounts, sitesX, ...rest } = DATA; if (rest.role === 'meeting') delete rest.role; store.set('cache', JSON.stringify(rest)); };
 let MEET = false; // 会議用パスワードで入ったとき true（金額を出す）
+let WORKER = false; // 職人の個人アカウントで入ったとき true（担当の物件だけ・見る＋訪問記録だけ）
 let MOTO_ORDER = [];
 const motoIdx = m => { const i = MOTO_ORDER.indexOf(m); return i < 0 ? 999 : i; };
 const yen = v => v === '' || v == null ? '' : Number(v).toLocaleString('ja-JP');
@@ -313,7 +318,10 @@ function build() {
   const visits = {}; (DATA.visits || []).forEach(v => (visits[v['現場名']] = visits[v['現場名']] || []).push(v));
   Object.values(visits).forEach(a => a.sort((x, y) => y['日時'].localeCompare(x['日時'])));
   MEET = DATA.role === 'meeting';
+  WORKER = DATA.role === 'worker';
   document.body.classList.toggle('meet', MEET);
+  document.body.classList.toggle('worker', WORKER);
+  if (WORKER && DATA.me) { store.set('user', DATA.me); $('#who').textContent = '👤 ' + DATA.me; }
   const am = {}; (DATA.amounts || []).forEach(a => am[a['現場名']] = a['金額（千円）']);
   const dw = {}; (DATA.drawings || []).forEach(x => (dw[x['現場名']] = dw[x['現場名']] || []).push(x));
   const motos = new Set(), workers = new Set();
@@ -470,11 +478,11 @@ function openSite(name) {
   const daysLabel = s.days == null || s.days < 0 ? '' : s.phase === '建確' ? `建確まで あと${s.days}日` : `あと${s.days}日`;
   // 写真は lh3 の直リンクで出す（drive.google.com の閲覧画面だとログインを求められる）
   const img = (id, w) => `https://lh3.googleusercontent.com/d/${encodeURIComponent(id)}=w${w}`;
-  const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' && v['距離m'] != null ? ` ／ ${esc(v['距離m'])}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}<button class="del" data-i="${i}">削除</button></div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="${img(id, 1600)}" target="_blank"><img src="${img(id, 200)}" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
+  const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' && v['距離m'] != null ? ` ／ ${esc(v['距離m'])}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}${!WORKER || v['記録者'] === DATA.me ? `<button class="del" data-i="${i}">削除</button>` : ''}</div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="${img(id, 1600)}" target="_blank"><img src="${img(id, 200)}" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
   $('#s_body').innerHTML = `
   <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${daysLabel}</span>${gq ? `<a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${gq}">Googleマップ ›</a>` : ''}</div>
     <div class="kv" style="margin-top:8px"><b>消検</b><span>${dueTxt}</span>${ex['建築確認検査日'] ? `<b>建確</b><span>${esc(fmtDT(ex['建築確認検査日']))}</span>` : ''}<b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${fireFor(s['住所']) ? `<b>所轄</b><span>${fireFor(s['住所']).name}（<a href="tel:${fireFor(s['住所']).tel}">${fireFor(s['住所']).tel}</a>）</span>` : ''}${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
-    <div class="flags" id="flags" style="margin-top:8px">${flags}</div><div class="gps" style="margin-top:3px">タップで 空→〇→／→△ と切り替わります（青枠＝アプリで変えたもの）</div></div>
+    <div class="flags" id="flags" style="margin-top:8px">${flags}</div><div class="gps flagnote" style="margin-top:3px">タップで 空→〇→／→△ と切り替わります（青枠＝アプリで変えたもの）</div></div>
   <div class="row" style="gap:6px">${s['手入力'] ? '<span class="tag">アプリで追加</span><button class="btn sub sm" id="x_edit">編集</button><button class="btn sub sm danger" id="x_del">削除</button>' : ''}<button class="btn sub sm" id="x_loc">${s.lat == null ? '位置を設定' : '位置を直す'}</button></div>
   <div class="sec" id="dwsec"><h3>図面（PDF）${s.drawings.length ? ` ${s.drawings.length}件` : ''}</h3>
     <div class="dwlist">${s.drawings.map(x => `<div class="dw"><a href="#" data-id="${esc(x['ファイルID'])}" class="dwopen">📄 ${esc(x['ファイル名'])}</a><small>${esc(x['サイズKB'])}KB・${esc(String(x['登録日時']).slice(5, 10).replace('-', '/'))} ${esc(x['登録者'])}</small><button class="del dwdel" data-id="${esc(x['ファイルID'])}" data-n="${esc(x['ファイル名'])}">削除</button></div>`).join('') || '<div class="gps">まだありません</div>'}</div>
@@ -496,6 +504,8 @@ function openSite(name) {
     <div class="row" style="justify-content:flex-end"><button class="btn sub" id="e_save">保存</button></div>
     ${ex['更新日時'] ? `<div class="gps">最終更新 ${esc(String(ex['更新日時']).slice(0, 16).replace('T', ' '))} ${esc(ex['更新者'])}</div>` : ''}</div>`;
   $('#sheet').classList.add('open');
+  // 職人は物件情報を見るだけ（入力欄を触れなくする。サーバー側でも保存を断る）
+  if (WORKER) $('#s_body').querySelectorAll('#e_alias,#e_fire,#e_fireT,#e_bldg,#e_bldgT,#e_del,#e_prog').forEach(el => (el.disabled = true));
   extraInit = extraValues(); // 開いた時点の値。保存のときは変えた項目だけ送る
   $('#v_send').onclick = () => sendVisit(s);
   $('#x_loc').onclick = () => openForm('loc', s);
@@ -614,6 +624,7 @@ function flagSpans(s) {
 const flagTimers = {};
 function flushFlags() { Object.keys(flagTimers).forEach(k => { const t = flagTimers[k]; delete flagTimers[k]; clearTimeout(t.id); t.fn(); }); }
 function bindFlags(s) {
+  if (WORKER) return; // 職人は見るだけ
   $('#flags').querySelectorAll('span.tap').forEach(el => el.onclick = () => {
     const f = el.dataset.f;
     if (!(('元_' + f) in s)) s['元_' + f] = String(s[f] || ''); // Excelの値（最初の1回だけ控える）
@@ -769,6 +780,7 @@ function fillUsers(list) {
 }
 function showLogin() {
   pending = null; // 前に確かめた結果（古いデータ）を使い回さない
+  $('#l_user').disabled = false;
   $('#login').style.display = 'flex';
   const cached = store.get('users'); fillUsers(cached ? cached.split(',') : null);
   if (store.get('pw')) $('#l_pw').value = store.get('pw');
@@ -781,14 +793,17 @@ async function checkPw() {
   $('#l_msg').textContent = '';
   const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}&t=${Date.now()}`); const j = await r.json();
   if (!j.ok) { $('#l_msg').textContent = j.error; return null; }
-  pending = { pw, j }; store.set('users', j.users.join(',')); fillUsers(j.users); return j;
+  pending = { pw, j };
+  if (j.role === 'worker') { fillUsers([j.me]); $('#l_user').value = j.me; $('#l_user').disabled = true; } // 個人のパスワードなら記録者は本人に決まる
+  else { $('#l_user').disabled = false; store.set('users', j.users.join(',')); fillUsers(j.users); }
+  return j;
 }
 $('#l_pw').onchange = () => checkPw().catch(() => $('#l_msg').textContent = '通信エラー');
 $('#loginf').onsubmit = async e => {
   e.preventDefault();
   try {
     const j = await checkPw(); if (!j) return;
-    const user = $('#l_user').value;
+    const user = j.role === 'worker' ? j.me : $('#l_user').value;
     if (!user) { $('#l_msg').textContent = '記録者を選んでください'; return; }
     store.set('pw', $('#l_pw').value); store.set('user', user); DATA = j; pending = null; saveCache();
     $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; build(); setHH(); locate();
