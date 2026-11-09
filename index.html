@@ -790,15 +790,15 @@ async function openAdmin() {
   $('#s_body').querySelectorAll('tr[data-n]').forEach(tr => {
     const v = c => tr.querySelector(c).value.trim();
     tr.querySelector('.a_gen').onclick = () => { tr.querySelector('.a_pw').value = genPw(); };
-    tr.querySelector('.a_save').onclick = () => run({ action: 'saveAccount', oldName: tr.dataset.n, name: v('.a_name'), pw: v('.a_pw'), worker: v('.a_w') }, '保存しました');
+    tr.querySelector('.a_save').onclick = () => run({ action: 'saveAccount', oldName: tr.dataset.n, name: v('.a_name'), newPw: v('.a_pw'), worker: v('.a_w') }, '保存しました');
     tr.querySelector('.a_del').onclick = () => { if (confirm(`職人「${tr.dataset.n}」を削除します（ログインできなくなります。物件や訪問記録は消えません）。よろしいですか？`)) run({ action: 'deleteAccount', name: tr.dataset.n }, '削除しました'); };
   });
   $('#n_gen').onclick = () => { $('#n_pw').value = genPw(); };
-  $('#n_add').onclick = () => run({ action: 'saveAccount', name: $('#n_name').value.trim(), pw: $('#n_pw').value.trim(), worker: $('#n_w').value.trim() }, '追加しました');
+  $('#n_add').onclick = () => run({ action: 'saveAccount', name: $('#n_name').value.trim(), newPw: $('#n_pw').value.trim(), worker: $('#n_w').value.trim() }, '追加しました');
   const shared = kind => async () => {
     const pw = $('#p_' + kind).value.trim();
     if (!confirm(`${kind === 'meeting' ? '会議用' : '普段用'}のパスワードを「${pw}」に変えます。よろしいですか？`)) return;
-    try { await post({ action: 'setSharedPw', kind, pw }); if (kind === 'meeting') store.set('pw', pw); toast('変更しました'); await load(true); openAdmin(); } catch (e) { toast(e.message); }
+    try { await post({ action: 'setSharedPw', kind, newPw: pw }); if (kind === 'meeting') store.set('pw', pw); toast('変更しました'); await load(true); openAdmin(); } catch (e) { toast(e.message); }
   };
   $('#p_normal_s').onclick = shared('normal'); $('#p_meeting_s').onclick = shared('meeting');
 }

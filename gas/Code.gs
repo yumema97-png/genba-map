@@ -140,7 +140,8 @@ function pwProblem_(pw, exceptName) {
 }
 // 職人を追加・変更。oldName があれば変更（名前の付け替えも可）。パスワードが空ならログインはできない（候補に出るだけ）
 function saveAccount(b) {
-  const name = clean(b.name), pw = clean(b.pw), worker = clean(b.worker) || name, oldName = clean(b.oldName);
+  // 新しいパスワードは newPw で受け取る（pw はログインのパスワードの欄なので使わない）
+  const name = clean(b.name), pw = clean(b.newPw), worker = clean(b.worker) || name, oldName = clean(b.oldName);
   if (!name) return { ok: false, error: '名前を入れてください' };
   const p = pwProblem_(pw, oldName || name); if (p) return { ok: false, error: p };
   const sh = accountSheet_(), v = sh.getDataRange().getValues();
@@ -161,7 +162,7 @@ function deleteAccount(b) {
 }
 // 普段用・会議用のパスワードを変える
 function setSharedPw(b) {
-  const pw = clean(b.pw), key = b.kind === 'meeting' ? '会議用パスワード' : 'パスワード';
+  const pw = clean(b.newPw), key = b.kind === 'meeting' ? '会議用パスワード' : 'パスワード';
   if (pw.length < 6) return { ok: false, error: 'パスワードは6文字以上にしてください' };
   const other = b.kind === 'meeting' ? cfg('パスワード') : cfg('会議用パスワード');
   if (pw === other || accounts_().some(a => a.pw === pw)) return { ok: false, error: 'ほかのパスワードと同じです' };
