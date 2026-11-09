@@ -65,7 +65,9 @@ table.pv{border-collapse:collapse;font-size:12px;white-space:nowrap}
 table.pv th,table.pv td{border:1px solid var(--line);padding:4px 7px}
 table.pv thead th{background:#ece9df;color:var(--muted);font-weight:600}
 table.pv tbody th{text-align:left;background:#f6f4ee;font-weight:600}
-table.pv td.num{text-align:right;font-variant-numeric:tabular-nums;min-width:52px}
+table.pv td.num{text-align:right;font-variant-numeric:tabular-nums;min-width:52px;line-height:1.25}
+table.pv td.num small{display:block;font-size:10px;color:var(--muted);font-weight:400}
+.pvwrap .pnote{font-size:11px;color:var(--muted)}
 table.pv .tot,table.pv tr.tot th,table.pv tr.tot td{font-weight:700;background:#fffbea}
 table.pv tr.sel th{background:#dfe8f6}
 /* 会議用の印刷：一覧の表だけをA4横で */
@@ -332,21 +334,23 @@ function monthTable() {
   const now = new Date(), fy = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
   const months = Array.from({ length: 12 }, (_, i) => { const d = new Date(fy, 3 + i, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
   const cols = [...months, '他年度', '未定'];
-  const cell = {}, rowSum = {}, colSum = {}; let all = 0;
+  const cell = {}, rowSum = {}, colSum = {}, cnt = {}; let all = 0, allN = 0;
+  const inc = (k, v) => { cnt[k] = (cnt[k] || 0) + 1; return v; };
   const motos = MOTO_ORDER;
   DATA.sitesX.forEach(s => {
     const v = +s.amount || 0; if (!v) return;
     const ym = String(s['消検月'] || '').slice(0, 7);
     const c = !ym ? '未定' : months.includes(ym) ? ym : '他年度';
     const k = s['元請'] + '|' + c;
-    cell[k] = (cell[k] || 0) + v; rowSum[s['元請']] = (rowSum[s['元請']] || 0) + v; colSum[c] = (colSum[c] || 0) + v; all += v;
+    // 件数は金額が入っている物件だけ（Excelの「年間物件数（金額確定物件のみ）」と同じ数え方）
+    cell[k] = (cell[k] || 0) + inc(k, v); rowSum[s['元請']] = (rowSum[s['元請']] || 0) + inc('r|' + s['元請'], v); colSum[c] = (colSum[c] || 0) + inc('c|' + c, v); all += v; allN++;
   });
   const show = cols.filter(c => !['他年度', '未定'].includes(c) || colSum[c]); // 使っていない「他年度」「未定」は出さない
   const head = c => c.length === 7 ? `${+c.slice(5)}月` : c;
-  const td = v => `<td class="num">${v ? yen(v) : ''}</td>`;
+  const td = (v, n, cls = '') => `<td class="num ${cls}">${v ? `${yen(v)}<small>${n}件</small>` : ''}</td>`;
   return `<div class="pvwrap"><div class="pvtitle">消検月別の金額（千円）　${fy}年度（${fy}年4月〜${fy + 1}年3月）</div><table class="pv"><thead><tr><th>元請</th>${show.map(c => `<th>${head(c)}</th>`).join('')}<th>合計</th></tr></thead><tbody>` +
-    motos.filter(m => rowSum[m]).map(m => `<tr${motoF === m ? ' class="sel"' : ''}><th>${esc(m)}</th>${show.map(c => td(cell[m + '|' + c])).join('')}<td class="num tot">${yen(rowSum[m])}</td></tr>`).join('') +
-    `<tr class="tot"><th>合計</th>${show.map(c => td(colSum[c])).join('')}<td class="num tot">${yen(all)}</td></tr></tbody></table></div>`;
+    motos.filter(m => rowSum[m]).map(m => `<tr${motoF === m ? ' class="sel"' : ''}><th>${esc(m)}</th>${show.map(c => td(cell[m + '|' + c], cnt[m + '|' + c])).join('')}${td(rowSum[m], cnt['r|' + m], 'tot')}</tr>`).join('') +
+    `<tr class="tot"><th>合計</th>${show.map(c => td(colSum[c], cnt['c|' + c])).join('')}${td(all, allN, 'tot')}</tr></tbody></table><div class="pnote" style="margin-top:4px">上段＝金額（千円）、下段＝件数（金額が入っている物件の数）</div></div>`;
 }
 function showTab(t) {
   document.body.classList.toggle('list', t === 'list');
