@@ -52,6 +52,22 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .motobar{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}
 .motobar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
 .motobar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.motobar button.print{margin-left:auto;background:var(--blu);color:#fff;border-color:var(--blu)}
+.sumline{padding:6px 14px;font-size:13px;border-bottom:1px solid var(--line);background:#fffbea}
+.sumline .pnote{color:var(--muted);font-size:11px;margin-left:8px}
+table.lt td.num{text-align:right;font-variant-numeric:tabular-nums}
+/* 会議用の印刷：一覧の表だけをA4横で */
+@media print{
+  @page{size:A4 landscape;margin:10mm}
+  header,#map,#sheet,#toast,#login,.item,.motobar,.sumline .pnote{display:none!important}
+  body{display:block;background:#fff;height:auto}
+  #listpage{display:block!important;overflow:visible}
+  table.lt{display:table!important;font-size:10px}
+  table.lt th{position:static;background:#eee!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  table.lt td{padding:3px 5px;white-space:normal}
+  table.lt tr{break-inside:avoid}
+  .dot,.sumline{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;color:#fff;font-size:12px;font-weight:600}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .row label{font-size:12px;color:var(--muted)}
@@ -203,6 +219,10 @@ function locate() {
 function dist(a, b) { const R = 6371000, toR = x => x * Math.PI / 180; const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng); const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(s)); }
 
 // ===== データ =====
+// 端末に残すキャッシュには金額を入れない（会議用PC以外に残らないように）
+const saveCache = () => { const { amounts, role, ...rest } = DATA; store.set('cache', JSON.stringify(rest)); };
+let MEET = false; // 会議用パスワードで入ったとき true（金額を出す）
+const yen = v => v === '' || v == null ? '' : Number(v).toLocaleString('ja-JP');
 async function load(force) {
   const pw = store.get('pw');
   if (!force) { const c = store.get('cache'); if (c) { try { DATA = JSON.parse(c); build(); } catch (e) {} } }
@@ -210,7 +230,7 @@ async function load(force) {
     const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}&t=${Date.now()}`);
     const j = await r.json();
     if (!j.ok) { toast(j.error || '読み込み失敗'); return false; }
-    DATA = j; store.set('cache', JSON.stringify(j)); build(); return true;
+    DATA = j; saveCache(); build(); return true;
   } catch (e) { toast('通信エラー（キャッシュ表示中）'); return false; }
 }
 function build() {
@@ -218,6 +238,9 @@ function build() {
   const extra = {}; (DATA.extra || []).forEach(e => extra[e['現場名']] = e);
   const visits = {}; (DATA.visits || []).forEach(v => (visits[v['現場名']] = visits[v['現場名']] || []).push(v));
   Object.values(visits).forEach(a => a.sort((x, y) => y['日時'].localeCompare(x['日時'])));
+  MEET = DATA.role === 'meeting';
+  document.body.classList.toggle('meet', MEET);
+  const am = {}; (DATA.amounts || []).forEach(a => am[a['現場名']] = a['金額（千円）']);
   const motos = new Set();
   DATA.sitesX = (DATA.sites || []).map(s => {
     const ex = extra[s['現場名']] || {};
@@ -228,7 +251,7 @@ function build() {
       if (days < 0) cat = '完成済'; else { cat = '灰'; for (const [d, c] of BANDS) if (days <= d) { cat = c; break; } }
     }
     motos.add(s['元請']);
-    return { ...s, ex, due, dueExact: !!ex['消検日'], cat, days, visits: visits[s['現場名']] || [], lat: +s['緯度'] || null, lng: +s['経度'] || null };
+    return { ...s, amount: am[s['現場名']] ?? '', ex, due, dueExact: !!ex['消検日'], cat, days, visits: visits[s['現場名']] || [], lat: +s['緯度'] || null, lng: +s['経度'] || null };
   });
   const sel = $('#moto'); const cur = sel.value; sel.innerHTML = '<option value="">元請：全部</option>' + [...motos].map(m => `<option>${esc(m)}</option>`).join(''); sel.value = cur;
   document.querySelectorAll('.chip[data-c]').forEach(ch => ch.querySelector('b').textContent = DATA.sitesX.filter(s => s.cat === ch.dataset.c).length);
@@ -264,20 +287,24 @@ let sortKey = 'due', sortAsc = true;
 function renderList() {
   const order = ['赤', '黄', '青', '灰', '未定', '完成済'];
   let items = DATA.sitesX.filter(s => visible(s));
-  const keyf = { due: s => [order.indexOf(s.cat), s.days ?? 9e9], name: s => s['現場名'], moto: s => s['元請'], last: s => s.visits[0]?.['日時'] || '' }[sortKey];
+  const keyf = { due: s => [order.indexOf(s.cat), s.days ?? 9e9], name: s => s['現場名'], moto: s => s['元請'], last: s => s.visits[0]?.['日時'] || '', amount: s => [0, -(+s.amount || 0)] }[sortKey];
   items.sort((a, b) => { const x = keyf(a), y = keyf(b); const r = Array.isArray(x) ? (x[0] - y[0] || x[1] - y[1]) : String(x).localeCompare(String(y), 'ja'); return sortAsc ? r : -r; });
   const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? '完成' : 'あと' + s.days + '日') : ''}` : '未定';
-  const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}</div></div>`).join('');
+  const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div><b>${esc(s['現場名'])}</b><small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}${MEET && s.amount !== '' ? `<br>${yen(s.amount)}千円` : ''}</div></div>`).join('');
   const th = (k, t) => `<th data-k="${k}">${t}${sortKey === k ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>`;
-  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td><b>${esc(s['現場名'])}</b>${s['要確認'] ? ` <span style="color:var(--red)">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? fmtDT(s.ex['消検日']) : s.due.slice(0, 7).replace('-', '/') + '（月）') : '未定'}</td><td>${s.days != null ? (s.days < 0 ? '完成' : s.days) : ''}</td><td>${fmtDT(s.ex['建築確認検査日'])}</td><td class="fl">${FLAGS.filter(f => ['〇', '△'].includes(normF(s[f]))).map(f => f + (normF(s[f]) === '△' ? '△' : '')).join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td></tr>`).join('');
+  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td><b>${esc(s['現場名'])}</b>${s['要確認'] ? ` <span style="color:var(--red)">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? fmtDT(s.ex['消検日']) : s.due.slice(0, 7).replace('-', '/') + '（月）') : '未定'}</td><td>${s.days != null ? (s.days < 0 ? '完成' : s.days) : ''}</td><td>${fmtDT(s.ex['建築確認検査日'])}</td><td class="fl">${FLAGS.filter(f => ['〇', '△'].includes(normF(s[f]))).map(f => f + (normF(s[f]) === '△' ? '△' : '')).join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td>${MEET ? `<td class="num">${yen(s.amount)}</td>` : ''}</tr>`).join('');
   // 電気屋（元請）ボタン。件数は元請以外の絞り込みを効かせた数
-  const motoCount = {}; let motoAll = 0;
-  DATA.sitesX.forEach(s => { if (!visible(s, true)) return; motoAll++; motoCount[s['元請']] = (motoCount[s['元請']] || 0) + 1; });
-  const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}</button>${Object.keys(motoCount).sort((a, b) => a.localeCompare(b, 'ja')).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}</button>`).join('')}</div>`;
+  const motoCount = {}, motoSum = {}; let motoAll = 0, sumAll = 0;
+  DATA.sitesX.forEach(s => { if (!visible(s, true)) return; motoAll++; sumAll += +s.amount || 0; motoCount[s['元請']] = (motoCount[s['元請']] || 0) + 1; motoSum[s['元請']] = (motoSum[s['元請']] || 0) + (+s.amount || 0); });
+  const sumTxt = n => MEET ? ` ／ ${yen(n)}千円` : '';
+  const shown = items.reduce((a, s) => a + (+s.amount || 0), 0);
+  const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}${sumTxt(sumAll)}</button>${Object.keys(motoCount).sort((a, b) => a.localeCompare(b, 'ja')).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}${sumTxt(motoSum[m])}</button>`).join('')}${MEET ? '<button id="printbtn" class="print">印刷</button>' : ''}</div>` +
+    (MEET ? `<div class="sumline"><b>会議用</b>　${new Date().toLocaleDateString('ja-JP')} 現在　${motoF ? esc(motoF) : '全元請'}　${items.length}件　合計 <b>${yen(shown)}</b> 千円<span class="pnote">（表示中の色・絞り込みの範囲。未定・完成済は上のチップで出す）</span></div>` : '');
   $('#listpage').innerHTML = motobar + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
-    `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th></tr></thead><tbody>${rows}</tbody></table>`;
+    `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th>${MEET ? th('amount', '金額（千円）') : ''}</tr></thead><tbody>${rows}</tbody></table>`;
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
-  $('#listpage').querySelectorAll('.motobar button').forEach(el => el.onclick = () => { motoF = el.dataset.m; $('#moto').value = motoF; render(); });
+  $('#listpage').querySelectorAll('.motobar button[data-m]').forEach(el => el.onclick = () => { motoF = el.dataset.m; $('#moto').value = motoF; render(); });
+  if ($('#printbtn')) $('#printbtn').onclick = () => window.print();
   $('#listpage').querySelectorAll('th[data-k]').forEach(el => el.onclick = () => { if (sortKey === el.dataset.k) sortAsc = !sortAsc; else { sortKey = el.dataset.k; sortAsc = true; } renderList(); });
 }
 function showTab(t) {
@@ -382,7 +409,7 @@ function bindFlags(s) {
     // 続けてタップしても最後の値だけ送る
     const key = s['現場名'] + '|' + f; clearTimeout(flagTimers[key]);
     flagTimers[key] = setTimeout(() => post({ action: 'setFlag', site: s['現場名'], key: f, value: nx, base: s['元_' + f] })
-      .then(() => { store.set('cache', JSON.stringify(DATA)); toast(`${f}：${nx || '空欄'} を保存しました`); renderList(); })
+      .then(() => { saveCache(); toast(`${f}：${nx || '空欄'} を保存しました`); renderList(); })
       .catch(e => toast('保存失敗：' + e.message)), 800);
   });
 }
@@ -520,7 +547,7 @@ $('#loginf').onsubmit = async e => {
     const j = await checkPw(); if (!j) return;
     const user = $('#l_user').value;
     if (!user) { $('#l_msg').textContent = '記録者を選んでください'; return; }
-    store.set('pw', $('#l_pw').value); store.set('user', user); DATA = j; store.set('cache', JSON.stringify(j));
+    store.set('pw', $('#l_pw').value); store.set('user', user); DATA = j; saveCache();
     $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; build(); locate();
   } catch (err) { $('#l_msg').textContent = '通信エラー'; }
 };

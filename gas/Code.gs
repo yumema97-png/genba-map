@@ -33,6 +33,9 @@ const FLAG_SHEET = 'フラグ変更';
 const FLAG_COLS = ['現場名', '項目', '値', '元の値', '日時', '更新者'];
 const FLAG_KEYS = ['図面', 'ELV', '見積', '受注', '発注', '着工', '設置', '下検査'];
 const FLAG_VALUES = ['', '〇', '／', '△'];
+// 金額（千円）は物件シートに入れない（普段のパスワードでは返さない）。会議用パスワードのときだけ返す
+const AMOUNT_SHEET = '金額';
+const AMOUNT_COLS = ['現場名', '金額（千円）', '取込日時'];
 const MANUAL_COLS = ['現場名', '元請', '職人', '消検月', '注意点', '住所', '緯度', '経度', '登録日時', '登録者', '更新日時', '更新者'];
 const PHOTO_FOLDER = '現場写真';
 
@@ -75,14 +78,36 @@ function cfg(key) {
   return '';
 }
 
+// 普段のパスワード → 'normal'、会議用パスワード（設定シート、空欄なら無効）→ 'meeting'
+function roleOf(pw) {
+  if (!pw) return '';
+  const m = cfg('会議用パスワード');
+  if (m && pw === m) return 'meeting';
+  return pw === cfg('パスワード') ? 'normal' : '';
+}
+
+function AMOUNT_SHEET_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(AMOUNT_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(AMOUNT_SHEET);
+    sh.getRange(1, 1, 1, AMOUNT_COLS.length).setValues([AMOUNT_COLS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return AMOUNT_SHEET;
+}
+
 // ---------- Web API ----------
 function doGet(e) {
   const p = (e && e.parameter) || {};
   // 記録者の名前だけはパスワードなしで返す（ログイン画面で最初から選べるように。2026-11-09 Yoko 了承）
   if (p.mode === 'users') return json({ ok: true, users: cfg('記録者').split(',').map(s => s.trim()).filter(Boolean) });
-  if (p.pw !== cfg('パスワード')) return json({ ok: false, error: 'パスワードが違います' });
+  const role = roleOf(p.pw);
+  if (!role) return json({ ok: false, error: 'パスワードが違います' });
   return json({
     ok: true,
+    role,
+    amounts: role === 'meeting' ? readSheet(AMOUNT_SHEET_()) : undefined,
     sites: allSites(),
     extra: readSheet(SHEETS.extra),
     visits: readSheet(SHEETS.visits),
@@ -95,7 +120,7 @@ function doGet(e) {
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json({ ok: false, error: 'bad json' }); }
-  if (body.pw !== cfg('パスワード')) return json({ ok: false, error: 'パスワードが違います' });
+  if (!roleOf(body.pw)) return json({ ok: false, error: 'パスワードが違います' });
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
@@ -364,7 +389,7 @@ function importFromExcel() {
   readSheet(MANUAL_SHEET).forEach(r => (old[r['現場名']] = { '住所': r['住所'], '緯度': r['緯度'], '経度': r['経度'] }));
   readSheet(SHEETS.sites).forEach(r => (old[r['現場名']] = r));
 
-  const rows = [];
+  const rows = [], amts = [];
   const now = new Date();
   ss.getSheets().forEach(sh => {
     if (!/^R\d+年度_/.test(sh.getName())) return;
@@ -390,6 +415,7 @@ function importFromExcel() {
         if (g) { lat = g.lat; lng = g.lng; } else chk = '座標取得失敗';
       }
       if (!addr) chk = '住所不明';
+      amts.push([name, typeof r[13] === 'number' ? r[13] : '', now]); // N列 金額（千円）
       rows.push([name, moto, r[3] || '', ym, r[5] || '', r[6] || '', r[7] || '', r[8] || '', r[9] || '', r[10] || '', r[11] || '', r[12] || '', r[14] || '', addr, lat, lng, chk, now]);
     }
   });
@@ -400,6 +426,9 @@ function importFromExcel() {
   sitesSh.getRange(2, SITE_COLS.indexOf('消検月') + 1, Math.max(rows.length, 1), 1).setNumberFormat('@');
   sitesSh.getRange(1, 1, 1, SITE_COLS.length).setValues([SITE_COLS]).setFontWeight('bold');
   sitesSh.getRange(2, 1, rows.length, SITE_COLS.length).setValues(rows);
+  const amSh = SpreadsheetApp.getActive().getSheetByName(AMOUNT_SHEET_());
+  amSh.getRange(2, 1, Math.max(amSh.getLastRow() - 1, 1), AMOUNT_COLS.length).clearContent();
+  amSh.getRange(2, 1, amts.length, AMOUNT_COLS.length).setValues(amts);
   pruneFlags_();
   return rows.length;
 }
