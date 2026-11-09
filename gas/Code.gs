@@ -244,6 +244,8 @@ function importFromExcel() {
   DriveApp.getFileById(tmp.id).setTrashed(true);
   if (rows.length === 0) throw new Error('物件行が0件でした');
   sitesSh.clearContents();
+  // 消検月 "2026-11" を日付に化けさせない（文字列のまま置く）
+  sitesSh.getRange(2, SITE_COLS.indexOf('消検月') + 1, Math.max(rows.length, 1), 1).setNumberFormat('@');
   sitesSh.getRange(1, 1, 1, SITE_COLS.length).setValues([SITE_COLS]).setFontWeight('bold');
   sitesSh.getRange(2, 1, rows.length, SITE_COLS.length).setValues(rows);
   return rows.length;
