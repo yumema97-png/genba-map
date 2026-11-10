@@ -438,11 +438,15 @@ begin
 end $$;
 
 -- 最初の1回だけ：スプレッドシートの中身を丸ごと入れる（cfg が空のときだけ動く）
-create or replace function bootstrap(p_dump jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+-- 2回目以降（切り替えの直前にスプレッドシートから入れ直すとき）は、GASのトークンが合うときだけ。全部消してから入れる
+create or replace function bootstrap(p_dump jsonb, p_token text default '') returns jsonb language plpgsql security definer set search_path = public as $$
 declare d jsonb := p_dump;
 begin
-  if exists (select 1 from cfg) then raise exception 'already initialized'; end if;
+  if exists (select 1 from cfg) and not _gas_ok(p_token) then raise exception 'already initialized'; end if;
+  if coalesce(d -> 'cfg' ->> 'gas_token', '') = '' then raise exception 'gas_token missing'; end if;
   perform pg_advisory_xact_lock(4711);
+  delete from cfg; delete from accounts; delete from sites; delete from manual; delete from edits;
+  delete from amounts; delete from extra; delete from visits; delete from drawings;
   insert into cfg select key, value from jsonb_each_text(d -> 'cfg');
   insert into accounts select _t(x, '名前'), _t(x, 'パスワード'), _t(x, '担当名'), _t(x, 'メモ')
     from jsonb_array_elements(d -> 'accounts') x where _t(x, '名前') <> '' on conflict do nothing;
@@ -496,5 +500,6 @@ grant execute on function act(text, text, text, jsonb) to anon;
 grant execute on function gas_sites(text) to anon;
 grant execute on function gas_import(text, jsonb, jsonb, text, text) to anon;
 grant execute on function gas_files(text) to anon;
-grant execute on function bootstrap(jsonb) to anon;
+drop function if exists bootstrap(jsonb);
+grant execute on function bootstrap(jsonb, text) to anon;
 alter default privileges in schema public revoke execute on functions from public, anon, authenticated;

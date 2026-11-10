@@ -218,6 +218,8 @@ function doGet(e) {
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json({ ok: false, error: 'bad json' }); }
+  // Supabase 版の画面からの写真・図面の保存（パスワードは Supabase に確かめる）
+  if (body.action === 'sbPhotos' || body.action === 'sbDrawing') return json(sbUpload_(body));
   const who = auth_(body.pw);
   if (!who.role) return json({ ok: false, error: 'パスワードが違います' });
   // 金額を書けるのは会議用で入ったときだけ（普段用には金額を見せていないので、書かせもしない）
@@ -677,6 +679,7 @@ function json(obj) {
 // Excelはパソコンのタスク「現場マップExcel複製」が火曜・土曜の夜にサーバーから複製している。
 function importIfChanged() {
   try { cleanupDrawings_(); } catch (e) { console.error('図面の整理に失敗: ' + e.message); } // 古い図面の整理（毎朝）
+  try { sbCleanup_(); } catch (e) { console.error('Supabase の図面・写真の整理に失敗: ' + e.message); }
   const xlsx = excelFile_();
   const updated = xlsx.getLastUpdated().getTime();
   const props = PropertiesService.getScriptProperties();
@@ -720,11 +723,32 @@ function importFromExcel(file) {
   readSheet(MANUAL_SHEET).forEach(r => (old[r['現場名']] = { '住所': r['住所'], '緯度': r['緯度'], '経度': r['経度'] }));
   readSheet(SHEETS.sites).forEach(r => (old[r['現場名']] = r));
 
-  const rows = [], amts = [], seen = {};
   const now = new Date();
-  const fy = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear(); // 今年度（4月始まり）
   const C = n => SITE_COLS.indexOf(n);
+  let rows, amts, sb = null;
   try {
+    ({ rows, amts } = parseExcel_(ss, old, now));
+    // Supabase 版にも入れる（併用の間）。住所・座標は Supabase 側のいまの値から
+    try {
+      const sbOld = sbRpc_('gas_sites', { p_token: sbToken_() });
+      sb = { old: sbOld, ...parseExcel_(ss, sbOld, now) };
+    } catch (e) { console.error('Supabase の取り込みの準備に失敗: ' + e.message); }
+  } finally {
+    DriveApp.getFileById(tmp.id).setTrashed(true);
+  }
+  if (rows.length === 0) throw new Error('物件行が0件でした');
+  writeImport_(rows, amts, now, xlsx, old);
+  if (sb) {
+    try { sbPushImport_(sb, now, xlsx); } catch (e) { console.error('Supabase への取り込みに失敗: ' + e.message); }
+  }
+  return rows.length;
+}
+
+// Excel（一時スプレッドシートに変換したもの）から物件行と金額を作る。old＝いまの住所・座標（現場名→{住所,緯度,経度}）
+function parseExcel_(ss, old, now) {
+  const rows = [], amts = [], seen = {};
+  const fy = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear(); // 今年度（4月始まり）
+  {
     ss.getSheets().forEach(sh => {
       if (!/^R\d+年度_/.test(sh.getName())) return;
       const moto = sh.getName().replace(/^R\d+年度_/, '');
@@ -760,11 +784,15 @@ function importFromExcel(file) {
         rows.push([txt(name), txt(moto), txt(r[3]), ym, txt(r[5]), txt(r[6]), txt(r[7]), txt(r[8]), txt(r[9]), txt(r[10]), txt(r[11]), txt(r[12]), txt(r[14]), txt(addr), lat, lng, chk, now]);
       }
     });
-  } finally {
-    DriveApp.getFileById(tmp.id).setTrashed(true);
   }
-  if (rows.length === 0) throw new Error('物件行が0件でした');
+  return { rows, amts };
+}
 
+// スプレッドシート版への書き込み
+// old＝Excelを読む前の住所・座標（読んでいる間に「位置を直す」で変わったものを見分ける）
+function writeImport_(rows, amts, now, xlsx, old) {
+  const C = n => SITE_COLS.indexOf(n);
+  const sitesSh = SpreadsheetApp.getActive().getSheetByName(SHEETS.sites);
   // ここから書き込み。アプリからの保存（位置を直す等）とぶつからないようロックを取る
   const lock = LockService.getScriptLock();
   lock.waitLock(60000);
@@ -798,7 +826,12 @@ function importFromExcel(file) {
   return rows.length;
 }
 
+const GEO_MEMO_ = {}; // 同じ住所を1回の実行で何度も引かない（取り込みでスプレッドシート版とSupabase版の2回作るため）
 function geocode(addr) {
+  if (addr in GEO_MEMO_) return GEO_MEMO_[addr];
+  return (GEO_MEMO_[addr] = geocodeRaw_(addr));
+}
+function geocodeRaw_(addr) {
   try {
     const res = Maps.newGeocoder().setRegion('jp').setLanguage('ja').geocode(addr);
     if (res.status !== 'OK' || !res.results.length) return null;
@@ -847,4 +880,105 @@ function kuFor(ns, j, ew) {
   if (ns === '南') return '中央区';
   if (ew === '東') return j >= 6 ? '東区' : '中央区';
   return j >= 10 ? '北区' : '中央区';
+}
+
+// ======================================================================
+// Supabase 版（2026-11-10〜）
+// データは Supabase（プロジェクト genba-map）。写真・図面のドライブ保存と、毎朝のExcel取り込みだけGASでやる。
+// GAS → Supabase はトークン（sbToken。GASが自分で作ってスクリプトのプロパティに置き、bootstrap で Supabase に登録）で確かめる。
+// 下の URL と publishable キーは公開してよいもの（表は直接読めない。関数だけ呼べる）
+// ======================================================================
+const SB_URL = 'https://twoyzxitmyusbqlkjzfi.supabase.co';
+const SB_KEY = 'sb_publishable_kohm5Neuh80PKUETukktug_5YqJQ1Ii';
+
+function sbRpc_(fn, args) {
+  const r = UrlFetchApp.fetch(SB_URL + '/rest/v1/rpc/' + fn, {
+    method: 'post', contentType: 'application/json', headers: { apikey: SB_KEY },
+    payload: JSON.stringify(args || {}), muteHttpExceptions: true,
+  });
+  const t = r.getContentText();
+  if (r.getResponseCode() >= 300) throw new Error(fn + ': ' + r.getResponseCode() + ' ' + t.slice(0, 300));
+  return JSON.parse(t);
+}
+function sbToken_() {
+  const p = PropertiesService.getScriptProperties();
+  let t = p.getProperty('sbToken');
+  if (!t) { t = Utilities.getUuid() + Utilities.getUuid(); p.setProperty('sbToken', t); }
+  return t;
+}
+
+// スプレッドシートの中身を丸ごと Supabase に入れる。エディタから手で実行する。
+// 1回目：Supabase が空のときだけ通る。2回目以降（切り替え直前の入れ直し）は Supabase の中身を全部消してから入れる
+function migrateToSupabase() {
+  const props = PropertiesService.getScriptProperties();
+  manualSheet(); flagSheet(); accountSheet_(); AMOUNT_SHEET_(); drawSheet_();
+  const dump = {
+    cfg: {
+      pw_normal: cfg('パスワード'), pw_meeting: cfg('会議用パスワード'), users: cfg('記録者'), radius: cfg('現地判定m'),
+      gas_token: sbToken_(), imported_at: props.getProperty('importedAt') || '', excel_at: props.getProperty('excelAt') || '',
+    },
+    accounts: readSheet(ACCOUNT_SHEET),
+    sites: readSheet(SHEETS.sites),
+    manual: readSheet(MANUAL_SHEET),
+    edits: readSheet(FLAG_SHEET),
+    amounts: readSheet(AMOUNT_SHEET),
+    extra: readSheet(SHEETS.extra),
+    visits: readSheet(SHEETS.visits),
+    drawings: readSheet(DRAW_SHEET),
+  };
+  const r = sbRpc_('bootstrap', { p_dump: dump, p_token: sbToken_() });
+  console.log(JSON.stringify(r));
+  return r;
+}
+
+// Supabase 版の画面からの写真・図面の保存。誰か・その物件を触ってよいかは Supabase に聞く
+function sbUpload_(b) {
+  let who;
+  try { who = sbRpc_('whoami', { p_pw: b.pw, p_site: b.site }); } catch (e) { return { ok: false, error: '確認できませんでした：' + e.message }; }
+  if (!who.ok) return who;
+  if (b.action === 'sbPhotos') {
+    const ids = (b.photos || []).map((p, i) => savePhoto(b.site, p, i)).filter(Boolean);
+    return { ok: true, ids };
+  }
+  if (who.role === 'worker') return { ok: false, error: 'この操作はできません（業務部に頼んでください）' };
+  try { return { ok: true, file: saveDrawingFile_(b) }; } catch (e) { return { ok: false, error: '図面を保存できませんでした：' + e.message }; }
+}
+
+// 取り込んだ物件を Supabase へ。sb.old＝Supabase のいまの住所・座標（読んでいる間に位置が直されたか見分ける）
+function sbPushImport_(sb, now, xlsx) {
+  const strip = v => (typeof v === 'string' ? v.replace(/^'/, '') : v);
+  const rows = sb.rows.map(row => {
+    const o = {};
+    SITE_COLS.forEach((c, i) => { o[c] = c === '取込日時' ? '' : strip(row[i]); });
+    const prev = sb.old[o['現場名']] || {};
+    o._prevLat = prev['緯度'] == null ? '' : prev['緯度'];
+    return o;
+  });
+  const amts = sb.amts.map(a => ({ '現場名': strip(a[0]), '金額（千円）': a[1] }));
+  const fmt = d => Utilities.formatDate(d, 'Asia/Tokyo', "yyyy-MM-dd'T'HH:mm:ss");
+  const r = sbRpc_('gas_import', { p_token: sbToken_(), p_rows: rows, p_amounts: amts, p_imported: fmt(now), p_excel: fmt(xlsx.getLastUpdated()) });
+  console.log('Supabase 取り込み: ' + JSON.stringify(r));
+}
+
+// 毎朝：消防検査から30日たった図面をゴミ箱へ。訪問記録の削除などで使われなくなった写真・図面もゴミ箱へ（ゴミ箱で30日は戻せる）。
+// 併用の間はスプレッドシート版で使っているファイルも残す。念のため、作って3日以内のファイルと、一度に30件を超えるときは触らない
+function sbCleanup_() {
+  const r = sbRpc_('gas_files', { p_token: sbToken_() });
+  const keep = new Set(r.keep || []);
+  readSheet(SHEETS.visits).forEach(v => String(v['写真'] || '').split('\n').filter(Boolean).forEach(id => keep.add(id)));
+  drawSheet_(); readSheet(DRAW_SHEET).forEach(d => keep.add(String(d['ファイルID'])));
+  (r.trash || []).forEach(id => { if (!keep.has(id)) { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) {} } });
+  if (keep.size === 0) return;
+  const limit = new Date(Date.now() - 3 * 86400000), orphans = [];
+  const scan = folder => {
+    const fs = folder.getFiles();
+    while (fs.hasNext()) { const f = fs.next(); if (!keep.has(f.getId()) && f.getDateCreated() < limit) orphans.push(f); }
+  };
+  const app = appFolder_();
+  scan(subFolder_(app, PHOTO_FOLDER));
+  const dws = subFolder_(app, '図面').getFolders();
+  while (dws.hasNext()) scan(dws.next());
+  if (orphans.length > 30) { console.error('使われていないファイルが' + orphans.length + '件。多すぎるので消さない（確かめてください）'); return; }
+  orphans.forEach(f => f.setTrashed(true));
+  if (orphans.length) console.log('使われていないファイルをゴミ箱へ: ' + orphans.length + '件');
 }
