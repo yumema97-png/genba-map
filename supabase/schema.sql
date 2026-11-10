@@ -168,7 +168,7 @@ end $$;
 -- 1項目の変更を記録（Excelと同じ値に戻したら記録を消す）
 create or replace function _set_edit(p_site text, p_key text, p_val text, p_base text, p_user text) returns void language plpgsql as $$
 begin
-  if p_val = case when p_key = any(_flag_keys()) then _norm_circle(p_base) else p_base end then
+  if (p_val = (case when p_key = any(_flag_keys()) then _norm_circle(p_base) else p_base end)) then
     delete from edits where "現場名" = p_site and "項目" = p_key;
   else
     insert into edits values (p_site, p_key, p_val, p_base, _now(), p_user)
@@ -352,8 +352,8 @@ begin
   elsif p_action = 'setSharedPw' then
     v := _t(b, 'newPw');
     if length(v) < 6 then return jsonb_build_object('ok', false, 'error', 'パスワードは6文字以上にしてください'); end if;
-    if v = case when _t(b, 'kind') = 'meeting' then cfgv('pw_normal') else cfgv('pw_meeting') end
-       or exists (select 1 from accounts where "パスワード" = v) then
+    if (v = (case when _t(b, 'kind') = 'meeting' then cfgv('pw_normal') else cfgv('pw_meeting') end)
+       or exists (select 1 from accounts where "パスワード" = v)) then
       return jsonb_build_object('ok', false, 'error', 'ほかのパスワードと同じです');
     end if;
     insert into cfg values (case when _t(b, 'kind') = 'meeting' then 'pw_meeting' else 'pw_normal' end, v)
