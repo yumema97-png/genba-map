@@ -1,0 +1,26 @@
+name: keepalive
+
+# Supabase 無料プランの「1週間アクセスがないと一時停止」を防ぐ。
+# 毎日1回、Supabase の関数 users（記録者の名前を返すだけ・パスワード不要）を呼んでDBを読む。
+# 年末年始などで誰もアプリを触らない期間でも止まらないようにするのが目的。
+# 返事がおかしいときは失敗にする（GitHub の Actions に赤く出る）。
+# ※ ほかに GAS の毎朝の取り込み（importIfChanged → gas_files）でも毎日 Supabase に触っている。
+# ※ 公開リポジトリは60日コミットがないと GitHub がこの定期実行を止める。止まったら Actions から再開する。
+
+on:
+  schedule:
+    - cron: "23 3 * * *" # 毎日 UTC 3:23（日本時間 12:23）
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        run: |
+          res=$(curl -fsS --max-time 30 -X POST \
+            "https://twoyzxitmyusbqlkjzfi.supabase.co/rest/v1/rpc/users" \
+            -H "apikey: sb_publishable_kohm5Neuh80PKUETukktug_5YqJQ1Ii" \
+            -H "Content-Type: application/json" -d '{}')
+          echo "$res"
+          echo "$res" | grep -q '"ok": *true'
