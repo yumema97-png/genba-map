@@ -71,7 +71,7 @@ revoke all on all sequences in schema public from anon, authenticated;
 -- ---------- 小道具 ----------
 create or replace function _now() returns timestamp language sql stable as
 $$ select date_trunc('second', now() at time zone 'Asia/Tokyo')::timestamp $$;
-create or replace function _cfg(p text) returns text language sql stable as
+create or replace function cfgv(p text) returns text language sql stable as
 $$ select coalesce((select v from cfg where k = p), '') $$;
 create or replace function _t(x jsonb, k text) returns text language sql immutable as
 $$ select btrim(coalesce(x ->> k, '')) $$;
@@ -92,14 +92,14 @@ $$ select array['元請','職人','消検月','注意点'] || _flag_keys() $$;
 create or replace function _auth(p_pw text) returns jsonb language sql stable as $$
   select case
     when coalesce(p_pw, '') = '' then jsonb_build_object('role', '')
-    when _cfg('pw_meeting') <> '' and p_pw = _cfg('pw_meeting') then jsonb_build_object('role', 'meeting')
-    when _cfg('pw_normal') <> '' and p_pw = _cfg('pw_normal') then jsonb_build_object('role', 'normal')
+    when cfgv('pw_meeting') <> '' and p_pw = cfgv('pw_meeting') then jsonb_build_object('role', 'meeting')
+    when cfgv('pw_normal') <> '' and p_pw = cfgv('pw_normal') then jsonb_build_object('role', 'normal')
     else coalesce((select jsonb_build_object('role', 'worker', 'name', "名前", 'worker', coalesce(nullif("担当名", ''), "名前"))
                    from accounts where "パスワード" <> '' and "パスワード" = p_pw limit 1), jsonb_build_object('role', ''))
   end $$;
 
 -- 物件一覧（Excel＋アプリ追加。アプリでの変更を重ねる。Excel側がその後変わった項目はExcelの値）
-create or replace function _sites() returns table (j jsonb, o float8, n text) language sql stable as $$
+create or replace function all_sites_j() returns table (j jsonb, o float8, n text) language sql stable as $$
   with x as (
     select to_jsonb(s) - 'ord' as j, s.ord::float8 as o, s."現場名" as n from sites s
     union all
@@ -115,7 +115,7 @@ create or replace function _sites() returns table (j jsonb, o float8, n text) la
   from x $$;
 
 -- 会議用の金額（Excel＋アプリで入れた金額）
-create or replace function _amounts() returns jsonb language sql stable as $$
+create or replace function amounts_j() returns jsonb language sql stable as $$
   select coalesce(jsonb_agg(jsonb_build_object('現場名', n, '金額（千円）', v)), '[]'::jsonb) from (
     select a."現場名" n,
            case when e."現場名" is not null and coalesce(a."金額（千円）"::text, '') = e."元の値" then nullif(e."値", '')::numeric else a."金額（千円）" end v
@@ -128,7 +128,7 @@ create or replace function _amounts() returns jsonb language sql stable as $$
 -- ---------- 画面から呼ぶ関数 ----------
 -- 記録者の名前（パスワードなしで返す。ログイン画面用）
 create or replace function users() returns jsonb language sql stable security definer set search_path = public as $$
-  select jsonb_build_object('ok', true, 'users', to_jsonb(_split(replace(_cfg('users'), ' ', ''))))
+  select jsonb_build_object('ok', true, 'users', to_jsonb(_split(replace(cfgv('users'), ' ', ''))))
 $$;
 
 -- 全データ（GAS版の doGet と同じ形）
@@ -137,21 +137,21 @@ declare a jsonb := _auth(p_pw); r text := a ->> 'role'; w text := a ->> 'worker'
 begin
   if r = '' then return jsonb_build_object('ok', false, 'error', 'パスワードが違います'); end if;
   if r = 'worker' then
-    select coalesce(array_agg(n), '{}') into mine from _sites() s where w = any(_split(s.j ->> '職人'));
+    select coalesce(array_agg(n), '{}') into mine from all_sites_j() s where w = any(_split(s.j ->> '職人'));
   end if;
   return jsonb_build_object(
     'ok', true, 'role', r,
     'me', case when r = 'worker' then a ->> 'name' end,
     'staff', case when r <> 'worker' then (select coalesce(jsonb_agg(coalesce(nullif("担当名", ''), "名前") order by "名前"), '[]') from accounts) end,
-    'amounts', case when r = 'meeting' then _amounts() end,
-    'sites', (select coalesce(jsonb_agg(s.j order by s.o, s.n), '[]') from _sites() s where r <> 'worker' or s.n = any(mine)),
+    'amounts', case when r = 'meeting' then amounts_j() end,
+    'sites', (select coalesce(jsonb_agg(s.j order by s.o, s.n), '[]') from all_sites_j() s where r <> 'worker' or s.n = any(mine)),
     'extra', (select coalesce(jsonb_agg(to_jsonb(e)), '[]') from extra e where r <> 'worker' or e."現場名" = any(mine)),
     'visits', (select coalesce(jsonb_agg(to_jsonb(v) - 'id' order by v.id), '[]') from visits v where r <> 'worker' or v."現場名" = any(mine)),
     'drawings', (select coalesce(jsonb_agg(to_jsonb(d) order by d."登録日時"), '[]') from drawings d where r <> 'worker' or d."現場名" = any(mine)),
-    'users', case when r = 'worker' then jsonb_build_array(a ->> 'name') else to_jsonb(_split(replace(_cfg('users'), ' ', ''))) end,
-    'radius', coalesce(nullif(_cfg('radius'), '')::int, 300),
+    'users', case when r = 'worker' then jsonb_build_array(a ->> 'name') else to_jsonb(_split(replace(cfgv('users'), ' ', ''))) end,
+    'radius', coalesce(nullif(cfgv('radius'), '')::int, 300),
     'updated', to_jsonb(_now()),
-    'importedAt', _cfg('imported_at'), 'excelAt', _cfg('excel_at'));
+    'importedAt', cfgv('imported_at'), 'excelAt', cfgv('excel_at'));
 end $$;
 
 -- GAS が写真・図面を保存する前に「この人は保存してよいか」を聞く
@@ -159,7 +159,7 @@ create or replace function whoami(p_pw text, p_site text) returns jsonb language
 declare a jsonb := _auth(p_pw); r text := a ->> 'role';
 begin
   if r = '' then return jsonb_build_object('ok', false, 'error', 'パスワードが違います'); end if;
-  if r = 'worker' and not exists (select 1 from _sites() s where s.n = p_site and (a ->> 'worker') = any(_split(s.j ->> '職人'))) then
+  if r = 'worker' and not exists (select 1 from all_sites_j() s where s.n = p_site and (a ->> 'worker') = any(_split(s.j ->> '職人'))) then
     return jsonb_build_object('ok', false, 'error', '担当の物件ではありません');
   end if;
   return jsonb_build_object('ok', true, 'role', r, 'name', a ->> 'name');
@@ -201,7 +201,7 @@ create or replace function _pw_problem(pw text, except_name text) returns text l
   select case
     when pw = '' then ''
     when length(pw) < 6 then 'パスワードは6文字以上にしてください'
-    when pw = _cfg('pw_normal') or pw = _cfg('pw_meeting') then '普段用・会議用と同じパスワードは使えません'
+    when pw = cfgv('pw_normal') or pw = cfgv('pw_meeting') then '普段用・会議用と同じパスワードは使えません'
     when exists (select 1 from accounts where "パスワード" = pw and "名前" <> coalesce(except_name, '')) then 'ほかの職人と同じパスワードです'
     else '' end $$;
 
@@ -220,7 +220,7 @@ begin
   if r = 'worker' then
     if p_action not in ('visit', 'deleteVisit') then return jsonb_build_object('ok', false, 'error', 'この操作はできません（業務部に頼んでください）'); end if;
     u := a ->> 'name';
-    if not exists (select 1 from _sites() s where s.n = site and (a ->> 'worker') = any(_split(s.j ->> '職人'))) then
+    if not exists (select 1 from all_sites_j() s where s.n = site and (a ->> 'worker') = any(_split(s.j ->> '職人'))) then
       return jsonb_build_object('ok', false, 'error', '担当の物件ではありません');
     end if;
     if p_action = 'deleteVisit' and _t(b, 'by') <> u then return jsonb_build_object('ok', false, 'error', '自分の記録だけ削除できます'); end if;
@@ -230,7 +230,7 @@ begin
   if p_action = 'listAccounts' then
     return jsonb_build_object('ok', true,
       'accounts', (select coalesce(jsonb_agg(jsonb_build_object('name', "名前", 'pw', "パスワード", 'worker', "担当名") order by "名前"), '[]') from accounts),
-      'normalPw', _cfg('pw_normal'), 'meetingPw', _cfg('pw_meeting'));
+      'normalPw', cfgv('pw_normal'), 'meetingPw', cfgv('pw_meeting'));
 
   elsif p_action = 'visit' then
     insert into visits ("日時", "記録者", "現場名", "建物進捗", "メモ", "写真", "緯度", "経度", "距離m")
@@ -352,7 +352,7 @@ begin
   elsif p_action = 'setSharedPw' then
     v := _t(b, 'newPw');
     if length(v) < 6 then return jsonb_build_object('ok', false, 'error', 'パスワードは6文字以上にしてください'); end if;
-    if v = case when _t(b, 'kind') = 'meeting' then _cfg('pw_normal') else _cfg('pw_meeting') end
+    if v = case when _t(b, 'kind') = 'meeting' then cfgv('pw_normal') else cfgv('pw_meeting') end
        or exists (select 1 from accounts where "パスワード" = v) then
       return jsonb_build_object('ok', false, 'error', 'ほかのパスワードと同じです');
     end if;
@@ -365,7 +365,7 @@ end $$;
 
 -- ---------- GAS から呼ぶ関数（gas_token で確かめる。トークンはGASが作ってbootstrapで登録） ----------
 create or replace function _gas_ok(p_token text) returns boolean language sql stable as
-$$ select coalesce(p_token, '') <> '' and p_token = _cfg('gas_token') $$;
+$$ select coalesce(p_token, '') <> '' and p_token = cfgv('gas_token') $$;
 
 -- 取り込みの前に、いまの住所・座標を渡す
 create or replace function gas_sites(p_token text) returns jsonb language plpgsql stable security definer set search_path = public as $$
