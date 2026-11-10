@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2b2f36">
+<meta name="apple-mobile-web-app-title" content="現場マップ">
+<title>現場マップ</title>
+<link rel="manifest" href="../manifest.json">
+<link rel="icon" href="../icon-192.png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#f3f1ec;--panel:#fff;--fg:#22251f;--muted:#6c6f66;--line:#ddd9ce;--red:#d64541;--yel:#e0a82e;--blu:#2f6fba;--gry:#8a8d84;--non:#cfcbc0;--done:#b9b6ad;--acc:#2b2f36;--font:"Hiragino Sans","Yu Gothic UI","Noto Sans JP",system-ui,sans-serif}
+*{box-sizing:border-box}html,body{height:100%;margin:0;overscroll-behavior:none}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);display:flex;flex-direction:column;font-size:14px}
+button,select,input,textarea{font:inherit}
+header{background:var(--acc);color:#fff;padding:calc(6px + env(safe-area-inset-top)) 10px 6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+header h1{font-size:15px;margin:0 4px 0 0;font-weight:700}
+.chip{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);color:#fff;border-radius:999px;padding:3px 9px;font-size:12px;cursor:pointer;display:inline-flex;gap:5px;align-items:center;user-select:none;white-space:nowrap}
+.chip .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.chip.off{opacity:.35}
+.chip.tog.on{background:#fff;color:var(--acc)}
+header input[type=search]{flex:1;min-width:90px;border:0;border-radius:6px;padding:4px 8px;font-size:13px}
+header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-width:120px}
+#map{flex:1;min-height:0}
+.pin{width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.45);position:relative}
+.pin.visited{opacity:.55}
+.pin.visited::after{content:"✓";position:absolute;inset:0;transform:rotate(45deg);color:#fff;font-size:11px;font-weight:700;text-align:center;line-height:14px}
+.pin.flag{border-color:#22251f;border-width:2px;box-shadow:0 0 0 2px #fff,0 1px 4px rgba(0,0,0,.5)}
+.pwrap{position:relative}
+.ptag{position:absolute;left:15px;top:-14px;white-space:nowrap;background:#22251f;color:#fff;font-size:10px;font-weight:700;line-height:1;padding:3px 5px;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.35);pointer-events:none}
+.pin.non{border-style:dashed;border-color:#555;background:#fff}
+.fire{width:22px;height:22px;border-radius:5px;background:#fff;border:2px solid #b3261e;color:#b3261e;font-size:12px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+#sheet{position:fixed;left:0;right:0;bottom:0;max-height:82%;background:var(--panel);border-radius:14px 14px 0 0;box-shadow:0 -4px 20px rgba(0,0,0,.25);transform:translateY(100%);transition:transform .2s;display:flex;flex-direction:column;z-index:1000;padding-bottom:env(safe-area-inset-bottom)}
+#sheet.open{transform:none}
+#sheet .hd{padding:10px 14px 6px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:8px}
+#sheet .hd .t{font-size:17px;font-weight:700;flex:1;min-width:0}
+#sheet .hd .t small{display:block;font-size:12px;color:var(--muted);font-weight:400}
+#sheet .close{border:0;background:#eee;border-radius:50%;width:30px;height:30px;font-size:16px}
+#sheet .bd{overflow:auto;padding:10px 14px 16px;display:flex;flex-direction:column;gap:12px}
+.sec{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.sec h3{margin:0 0 8px;font-size:13px;color:var(--muted);letter-spacing:.04em}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:13px}
+.kv b{font-weight:600;color:var(--muted)}
+.flags{display:flex;flex-wrap:wrap;gap:4px}
+.flags span{font-size:11px;padding:2px 7px;border-radius:4px;background:#eee;color:#999}
+.flags span.on{background:#dfeedc;color:#2a6b2e;font-weight:600}
+.flags span.tap{cursor:pointer;user-select:none;padding:4px 9px;font-size:12px;min-width:44px;text-align:center;border:1px solid transparent}
+.flags span.na{background:#eceae4;color:#77786f}
+.flags span.tri{background:#fbefd2;color:#8a5a00;font-weight:600}
+.flags span.app{border-color:var(--blu)}
+.motobar{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}
+.motobar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
+.motobar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+body.meet header .chip[data-c],body.meet #unvisited{display:none}
+#admin{display:none}body.meet #admin{display:inline-flex}
+.adm{width:100%;border-collapse:collapse;font-size:13px}.adm th,.adm td{border-bottom:1px solid var(--line);padding:6px 4px;text-align:left}
+.adm input{border:1px solid var(--line);border-radius:6px;padding:5px 7px;width:100%;font-family:ui-monospace,Consolas,monospace}
+.adm td.b{white-space:nowrap;text-align:right}
+/* 職人のアカウント：見る＋訪問記録だけ。追加・編集・位置・図面の保存/削除・物件情報の保存は出さない */
+body.worker #addsite,body.worker #x_loc,body.worker #x_edit,body.worker #x_del,body.worker #dwdrop,body.worker .dwdel,body.worker #e_save,body.worker button.clr,body.worker #worker,body.worker .flagnote{display:none!important}
+body.worker .flags span.tap{cursor:default}
+/* 会議用は会議室の画面で見るので大きく（印刷は下の @media print のまま） */
+@media screen{
+  body.meet .motobar button{font-size:16px;padding:7px 14px}
+  body.meet .sumline{font-size:18px;padding:10px 16px}
+  body.meet .sumline .pnote{font-size:13px}
+  body.meet .pvwrap{padding:14px 16px}
+  body.meet .pvtitle{font-size:20px;margin-bottom:10px}
+  body.meet table.pv{width:100%;font-size:21px}
+  body.meet table.pv th,body.meet table.pv td{padding:9px 10px}
+  body.meet table.pv td.num{min-width:76px}
+  body.meet table.pv td.num small{font-size:14px}
+  body.meet .pvwrap .pnote{font-size:14px}
+  body.meet table.lt{font-size:16px}
+  body.meet table.lt th{font-size:15px}
+  body.meet table.lt td{padding:9px 10px}
+  body.meet table.lt .fl{font-size:13px}
+  body.meet .item{font-size:16px}
+}
+.motobar button.print{margin-left:auto;background:var(--blu);color:#fff;border-color:var(--blu)}
+.sumline{padding:6px 14px;font-size:13px;border-bottom:1px solid var(--line);background:#fffbea}
+.sumline .pnote{color:var(--muted);font-size:11px;margin-left:8px}
+table.lt td.num{text-align:right;font-variant-numeric:tabular-nums}
+.pvwrap{padding:10px 12px;border-bottom:1px solid var(--line);overflow-x:auto}
+.pvtitle{font-size:13px;font-weight:700;margin-bottom:6px}
+table.pv{border-collapse:collapse;font-size:12px;white-space:nowrap}
+table.pv th,table.pv td{border:1px solid var(--line);padding:4px 7px}
+table.pv thead th{background:#ece9df;color:var(--muted);font-weight:600}
+table.pv tbody th{text-align:left;background:#f6f4ee;font-weight:600}
+table.pv td.num{text-align:right;font-variant-numeric:tabular-nums;min-width:52px;line-height:1.25}
+table.pv td.num small{display:block;font-size:10px;color:var(--muted);font-weight:400}
+.pvwrap .pnote{font-size:11px;color:var(--muted)}
+table.pv .tot,table.pv tr.tot th,table.pv tr.tot td{font-weight:700;background:#fffbea}
+table.pv tr.sel th{background:#dfe8f6}
+/* 会議用の印刷：一覧の表だけをA4横で */
+@media print{
+  @page{size:A4 landscape;margin:10mm}
+  header,#map,#sheet,#toast,#login,.item,.motobar,.sumline .pnote{display:none!important}
+  body{display:block;background:#fff;height:auto}
+  #listpage{display:block!important;overflow:visible}
+  table.lt{display:table!important;font-size:10px}
+  table.lt th{position:static;background:#eee!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  table.lt td{padding:3px 5px;white-space:normal}
+  table.lt tr{break-inside:avoid}
+  .dot,.sumline,table.pv th,table.pv td{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .pvwrap{overflow:visible;break-after:auto}
+  table.pv{font-size:10px}
+}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;color:#fff;font-size:12px;font-weight:600}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row label{font-size:12px;color:var(--muted)}
+input[type=date],select.f,textarea,input.f{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff;width:100%}
+textarea{min-height:60px;resize:vertical}
+input[type=time]{border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff}
+.row.dt{flex-wrap:nowrap}.row.dt label{width:96px;flex:none}.row.dt input[type=date]{flex:1;min-width:0;width:auto}.row.dt input[type=time]{width:92px;flex:none}
+button.clr{border:0;background:#eee;border-radius:50%;width:26px;height:26px;flex:none;color:var(--muted)}
+button.del{float:right;border:1px solid var(--line);background:#fff;color:var(--red);border-radius:6px;font-size:12px;padding:4px 10px;margin-left:8px}
+#who{cursor:pointer}#who:empty{display:none}
+.btn.sm{padding:5px 10px;font-size:12px}.btn.danger{color:var(--red)}
+.tag{font-size:11px;padding:2px 7px;border-radius:4px;background:#e6eefb;color:var(--blu);font-weight:600}
+label.fl2{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);margin-bottom:8px}
+label.fl2 textarea{min-height:44px}
+.btn{border:0;border-radius:8px;padding:9px 14px;background:var(--acc);color:#fff;font-weight:600}
+.btn.sub{background:#e9e6dd;color:var(--fg)}
+.btn:disabled{opacity:.5}
+.hist{display:flex;flex-direction:column;gap:8px}
+.hist .v{border-left:3px solid var(--line);padding:2px 10px}
+.hist .v:first-child{border-color:var(--acc)}
+.hist .v .d{font-size:12px;color:var(--muted)}
+.hist .v .s{font-weight:600}
+.ph{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.ph img{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee}
+.gps{font-size:12px;color:var(--muted)}
+a.ext{color:var(--blu);font-weight:600;text-decoration:none}
+#login{position:fixed;inset:0;background:var(--bg);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px}
+#login form{background:#fff;padding:22px;border-radius:12px;width:100%;max-width:320px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+#login h2{margin:0 0 4px;font-size:18px}
+#toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;z-index:3000;pointer-events:none}
+#toast.show{opacity:1}
+/* タブ */
+.tabs{display:flex;gap:2px;margin-right:6px}
+.tabs span{padding:4px 12px;border-radius:6px;cursor:pointer;font-size:13px;color:rgba(255,255,255,.7)}
+.tabs span.on{background:#fff;color:var(--acc);font-weight:700}
+body.list #map{display:none}
+#listpage{display:none;flex:1;overflow:auto;background:var(--panel)}
+body.list #listpage{display:block}
+/* 一覧：スマホはカード */
+.item{padding:8px 14px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center;cursor:pointer}
+.item:hover{background:#f6f4ee}
+.item .dot{width:10px;height:10px;border-radius:50%}
+.item small{display:block;color:var(--muted)}
+.item .ym{font-size:12px;color:var(--muted);white-space:nowrap;text-align:right}
+.item .ym b{display:block;color:var(--fg)}
+table.lt{display:none;border-collapse:collapse;width:100%;font-size:13px}
+table.lt th{position:sticky;top:var(--mb,0);z-index:1;background:#ece9df;text-align:left;padding:6px 8px;font-weight:600;color:var(--muted);white-space:nowrap;cursor:pointer}
+table.lt td{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+table.lt tr{cursor:pointer}table.lt tbody tr:hover{background:#f6f4ee}
+table.lt td.w{white-space:normal;min-width:160px}
+table.lt .fl{font-size:11px;color:#2a6b2e}
+/* PC：一覧は表、詳細は右パネル */
+@media (min-width:900px){
+  .item{display:none} table.lt{display:table}
+  #sheet{left:auto;top:var(--hh,0);bottom:0;width:440px;max-height:none;border-radius:0;box-shadow:-4px 0 20px rgba(0,0,0,.2)}
+}
+/* スマホ：日付欄が狭くならないよう、見出しを上の段に */
+@media (max-width:600px){
+  .row.dt{flex-wrap:wrap}.row.dt label{width:100%}
+  header .chip{padding:5px 10px}
+}
+.leaflet-tooltip{white-space:normal;max-width:220px}
+table.lt td.nm{white-space:normal;min-width:9em;max-width:18em}
+small.sub{display:block;font-size:11px;color:var(--muted);font-weight:400}
+.flags span.ro{background:none;color:var(--muted);padding-left:4px}
+.imp{display:block;font-size:10px;font-weight:400;opacity:.75;line-height:1.1}
+.impline{padding:5px 14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+.ptag.b{background:#5b3f86}
+.dwlist{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.dw{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dw a{color:var(--blu);font-weight:600;text-decoration:none;word-break:break-all}
+.dw small{color:var(--muted);font-size:11px}
+.dw button.del{float:none;margin-left:auto}
+.dwdrop{display:block;border:2px dashed var(--line);border-radius:10px;padding:14px;text-align:center;color:var(--muted);font-size:13px;cursor:pointer;background:#faf9f6}
+.dwdrop.over{border-color:var(--blu);background:#e6eefb;color:var(--blu)}
+.dwdrop.busy{border-color:var(--yel);color:#8a5a00}
+.pdfmark{font-size:11px;color:var(--muted);font-weight:400}
+#pickbar{display:none;position:fixed;left:50%;top:calc(var(--hh,60px) + 10px);transform:translateX(-50%);z-index:1500;background:#22251f;color:#fff;padding:8px 10px 8px 14px;border-radius:10px;gap:10px;align-items:center;font-size:13px;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+#pickbar button{border:0;border-radius:6px;padding:5px 10px;background:#fff;color:#22251f;font-weight:600}
+.leaflet-control-attribution{font-size:9px}
+</style>
+</head>
+<body>
+<div id="login"><form id="loginf">
+  <h2>現場マップ</h2>
+  <label>パスワード<input id="l_pw" class="f" type="password" autocomplete="current-password"></label>
+  <label>記録者<select id="l_user" class="f"></select></label>
+  <div style="font-size:11px;color:var(--muted)">個人のパスワードを持っている人は、記録者は自動で決まります</div>
+  <button class="btn" type="submit">開く</button>
+  <div id="l_msg" style="color:var(--red);font-size:12px"></div>
+</form></div>
+
+<header>
+  <h1>現場マップ<small id="impinfo" class="imp"></small></h1>
+  <div class="tabs"><span class="on" data-t="map">地図</span><span data-t="list">一覧</span></div>
+  <span class="chip" data-c="赤"><i class="dot" style="background:var(--red)"></i>60日 <b></b></span>
+  <span class="chip" data-c="黄"><i class="dot" style="background:var(--yel)"></i>90日 <b></b></span>
+  <span class="chip" data-c="青"><i class="dot" style="background:var(--blu)"></i>120日 <b></b></span>
+  <span class="chip" data-c="灰"><i class="dot" style="background:var(--gry)"></i>以降 <b></b></span>
+  <span class="chip" data-c="消検済" title="消防検査は済み、建築確認検査がまだ（建確日が未入力も含む）"><i class="dot" style="background:#8e6bb8"></i>消検済 <b></b></span>
+  <span class="chip off" data-c="未定"><i class="dot" style="background:var(--non)"></i>未定 <b></b></span>
+  <span class="chip off" data-c="完成済"><i class="dot" style="background:var(--done)"></i>完成済 <b></b></span>
+  <span class="chip tog" id="unvisited">未訪問のみ</span>
+  <span class="chip tog" id="firechip">消防署</span>
+  <select id="moto"><option value="">元請：全部</option></select>
+  <select id="worker"><option value="">職人：全員</option></select>
+  <input type="search" id="q" placeholder="現場名・正式名称で検索">
+  <span class="chip" id="addsite">＋物件</span>
+  <span class="chip" id="reload">更新</span>
+  <span class="chip" id="admin" title="職人とパスワードの管理（会議用パスワードのときだけ）">⚙管理</span>
+  <span class="chip" id="who" title="記録者を切り替える"></span>
+</header>
+<div id="map"></div>
+<div id="pickbar"><span>地図をタップして位置を決めてください</span><button id="pickcancel">やめる</button></div>
+<div id="listpage"></div>
+
+<div id="sheet">
+  <div class="hd"><div class="t" id="s_title"></div><button class="close" id="s_close">×</button></div>
+  <div class="bd" id="s_body"></div>
+</div>
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ===== 設定 =====
+// データは Supabase（2026-11-10〜）。GAS は写真・図面のドライブ保存だけ
+const SB_URL = 'https://twoyzxitmyusbqlkjzfi.supabase.co';
+const SB_KEY = 'sb_publishable_kohm5Neuh80PKUETukktug_5YqJQ1Ii'; // 公開してよいキー（表は直接読めない。関数だけ呼べる）
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzlpBd0scg1cLx1h7VyowWb2DHEhXkbUFhFjTxanTUpHLuTQI4uZBvIP294g4VRuTORLA/exec';
+const BANDS = [[60, '赤'], [90, '黄'], [120, '青']]; // 残り日数 → 区分
+const STAGES = ['基礎', '躯体', '外装', 'ボード', '天井', '仕上げ', '完了'];
+// 札幌市の消防署（出典：札幌市「消防局・消防署（所）一覧」2026-04-07更新。位置は国土地理院の住所検索＝丁目の代表点）
+const FIRE = [
+  { ku: '中央区', name: '中央消防署', addr: '中央区南4条西10丁目', tel: '011-215-2120', lat: 43.05430, lng: 141.34293 },
+  { ku: '北区', name: '北消防署', addr: '北区北24条西8丁目', tel: '011-737-2100', lat: 43.09014, lng: 141.33754 },
+  { ku: '東区', name: '東消防署', addr: '東区北24条東17丁目', tel: '011-781-2100', lat: 43.09477, lng: 141.37454 },
+  { ku: '白石区', name: '白石消防署', addr: '白石区南郷通6丁目北', tel: '011-861-2100', lat: 43.04206, lng: 141.40936 },
+  { ku: '厚別区', name: '厚別消防署', addr: '厚別区厚別中央1条5丁目', tel: '011-892-2100', lat: 43.03604, lng: 141.47295 },
+  { ku: '豊平区', name: '豊平消防署', addr: '豊平区月寒東1条8丁目', tel: '011-852-2100', lat: 43.02975, lng: 141.39966 },
+  { ku: '清田区', name: '清田消防署', addr: '清田区平岡1条1丁目', tel: '011-883-2100', lat: 42.99849, lng: 141.44351 },
+  { ku: '南区', name: '南消防署', addr: '南区真駒内上町5丁目', tel: '011-581-2100', lat: 42.99646, lng: 141.35828 },
+  { ku: '西区', name: '西消防署', addr: '西区発寒10条4丁目', tel: '011-667-2100', lat: 43.09171, lng: 141.29214 },
+  { ku: '手稲区', name: '手稲消防署', addr: '手稲区手稲本町2条5丁目', tel: '011-681-2100', lat: 43.12172, lng: 141.23856 },
+];
+const fireFor = addr => { const m = /札幌市(.+?区)/.exec(addr || ''); return m ? FIRE.find(f => f.ku === m[1]) : null; };
+// ===============
+
+const COL = { '赤': '#d64541', '黄': '#e0a82e', '青': '#2f6fba', '灰': '#8a8d84', '消検済': '#8e6bb8', '未定': '#cfcbc0', '完成済': '#b9b6ad' };
+const LABEL = { '赤': '60日以内', '黄': '90日以内', '青': '120日以内', '灰': '121日以降', '消検済': '消検済（建確待ち）', '未定': '消検未定', '完成済': '完成済（建確も済）' };
+const FLAGS = ['図面', 'ELV', '見積', '受注', '発注', '着工', '設置', '下検査'];
+let DATA = null, on = { '赤': 1, '黄': 1, '青': 1, '灰': 1, '消検済': 1, '未定': 0, '完成済': 0 }, unvisitedOnly = false, motoF = '', workerF = '', q = '';
+let markers = {}, layer = L.layerGroup(), curSite = null, myPos = null;
+const $ = s => document.querySelector(s);
+const toast = m => { const t = $('#toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200); };
+const store = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ===== 地図 =====
+const map = L.map('map', { zoomControl: false }).setView([43.06, 141.37], 12);
+L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', { attribution: '地理院タイル', maxZoom: 18 }).addTo(map);
+L.control.zoom({ position: 'bottomleft' }).addTo(map);
+layer.addTo(map);
+// 消防署レイヤー（物件ピンとは別。チップで表示切替）
+const fireLayer = L.layerGroup(FIRE.map(f => L.marker([f.lat, f.lng], {
+  icon: L.divIcon({ className: '', html: '<div class="fire">消</div>', iconSize: [22, 22], iconAnchor: [11, 11] }), zIndexOffset: -500,
+}).bindTooltip(f.name, { direction: 'top', offset: [0, -10] })
+  .bindPopup(`<b>${f.name}</b><br>${f.addr}<br><a href="tel:${f.tel}">${f.tel}</a>（予防課）<br><a target="_blank" href="https://www.google.com/maps/search/?api=1&query=${f.lat},${f.lng}">Googleマップ ›</a>`)));
+let fireOn = store.get('fire') !== '0';
+if (fireOn) fireLayer.addTo(map);
+let meMarker = null;
+function locate() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.watchPosition(p => {
+    myPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
+    if (!meMarker) meMarker = L.circleMarker([myPos.lat, myPos.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#1a73e8', fillOpacity: 1 }).addTo(map);
+    else meMarker.setLatLng([myPos.lat, myPos.lng]);
+    const g = $('#gps'); if (g) g.textContent = gpsText();
+  }, () => {}, { enableHighAccuracy: true, maximumAge: 10000 });
+}
+function dist(a, b) { const R = 6371000, toR = x => x * Math.PI / 180; const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng); const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(s)); }
+
+// ===== データ =====
+// 端末に残すキャッシュには金額を入れない（会議用PC以外に残らないように）
+// sitesX（表示用に作った物件。会議用だと各物件に amount が入る）も外す
+const saveCache = () => { const { amounts, sitesX, ...rest } = DATA; if (rest.role === 'meeting') delete rest.role; store.set('cache', JSON.stringify(rest)); };
+let MEET = false; // 会議用パスワードで入ったとき true（金額を出す）
+let WORKER = false; // 職人の個人アカウントで入ったとき true（担当の物件だけ・見る＋訪問記録だけ）
+let MOTO_ORDER = [];
+const motoIdx = m => { const i = MOTO_ORDER.indexOf(m); return i < 0 ? 999 : i; };
+const yen = v => v === '' || v == null ? '' : Number(v).toLocaleString('ja-JP');
+// 戻り値：'ok' 取れた／'auth' パスワードが違う／'net' 通信できない（圏外など。キャッシュのまま使う）
+async function load(force) {
+  const pw = store.get('pw');
+  if (!force) { const c = store.get('cache'); if (c) { try { DATA = JSON.parse(c); build(); } catch (e) {} } }
+  try {
+    const j = await rpc('load', { p_pw: pw });
+    if (!j.ok) { toast(j.error || '読み込み失敗'); return /パスワード/.test(j.error || '') ? 'auth' : 'net'; }
+    // 取り込みの途中などで物件が0件で返ったら、今の表示とキャッシュを残す
+    if (!(j.sites || []).length && DATA && (DATA.sites || []).length) { toast('物件が0件で返ってきました。少し待って「更新」を押してください'); return 'net'; }
+    DATA = j; saveCache(); build(); return 'ok';
+  } catch (e) { toast(DATA ? '通信できません（前回のデータを表示中）' : '通信できません'); return 'net'; }
+}
+// 詳細パネルで入力の途中か（このときは再取得で画面を作り直さない）
+function isEditing() {
+  if (!$('#sheet').classList.contains('open') || !curSite) return false;
+  const a = document.activeElement;
+  if (a && $('#s_body').contains(a) && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return true;
+  if (($('#v_memo') || {}).value || ($('#v_stage') || {}).value || (($('#v_photo') || {}).files || []).length) return true;
+  return extraChanged() !== null && Object.keys(extraChanged()).length > 0;
+}
+function build() {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const extra = {}; (DATA.extra || []).forEach(e => extra[e['現場名']] = e);
+  const visits = {}; (DATA.visits || []).forEach(v => (visits[v['現場名']] = visits[v['現場名']] || []).push(v));
+  Object.values(visits).forEach(a => a.sort((x, y) => y['日時'].localeCompare(x['日時'])));
+  MEET = DATA.role === 'meeting';
+  WORKER = DATA.role === 'worker';
+  document.body.classList.toggle('meet', MEET);
+  document.body.classList.toggle('worker', WORKER);
+  if (WORKER && DATA.me) { store.set('user', DATA.me); $('#who').textContent = '👤 ' + DATA.me; }
+  const am = {}; (DATA.amounts || []).forEach(a => am[a['現場名']] = a['金額（千円）']);
+  const dw = {}; (DATA.drawings || []).forEach(x => (dw[x['現場名']] = dw[x['現場名']] || []).push(x));
+  const motos = new Set(), workers = new Set();
+  const band = d => { for (const [n, c] of BANDS) if (d <= n) return c; return '灰'; };
+  const daysTo = ymd => Math.round((new Date(dPart(ymd)) - today) / 86400000);
+  DATA.sitesX = (DATA.sites || []).map(s0 => {
+    const s = { ...s0, '元請': s0['元請'] || '（元請なし）' };
+    const ex = extra[s['現場名']] || {};
+    let due = ex['消検日'] ? ex['消検日'].slice(0, 10) : (s['消検月'] ? endOfMonth(s['消検月']) : ''); // 月だけなら月末扱い
+    let cat = '未定', days = null, phase = '消検';
+    if (due) {
+      days = daysTo(due);
+      if (days >= 0) cat = band(days);
+      else {
+        // 消防検査が済んでも建築確認検査があるので消さない。建確日が過ぎて初めて「完成済」
+        const b = ex['建築確認検査日'];
+        if (!b) cat = '消検済';
+        else if (daysTo(b) >= 0) { phase = '建確'; days = daysTo(b); cat = band(days); }
+        else cat = '完成済';
+      }
+    }
+    motos.add(s['元請']);
+    splitW(s['職人']).forEach(w => workers.add(w));
+    return { ...s, drawings: dw[s['現場名']] || [], alias: String(ex['正式名称'] || ''), amount: am[s['現場名']] ?? '', ex, due, dueExact: !!ex['消検日'], cat, days, phase, visits: visits[s['現場名']] || [], lat: +s['緯度'] || null, lng: +s['経度'] || null };
+  });
+  MOTO_ORDER = [...motos].filter(Boolean); // 物件シートの並び＝Excelのシートの順（アプリで追加した物件の新しい元請は最後）
+  if (motoF && !MOTO_ORDER.includes(motoF)) motoF = '';
+  const sel = $('#moto'); sel.innerHTML = '<option value="">元請：全部</option>' + MOTO_ORDER.map(m => `<option>${esc(m)}</option>`).join(''); sel.value = motoF;
+  (DATA.staff || []).forEach(w => w && workers.add(w)); // 管理で追加した職人（まだ物件に名前が無い人）も候補に
+  const ws = [...workers].sort((a, b) => a.localeCompare(b, 'ja'));
+  if (workerF && !ws.includes(workerF)) workerF = '';
+  const wsel = $('#worker'); wsel.innerHTML = '<option value="">職人：全員</option>' + ws.map(w => `<option>${esc(w)}</option>`).join(''); wsel.value = workerF;
+  const fmtShort = v => v ? `${+v.slice(5, 7)}/${+v.slice(8, 10)} ${v.slice(11, 16)}` : '';
+  $('#impinfo').textContent = DATA.importedAt ? `Excel取込 ${fmtShort(DATA.importedAt)}` : '';
+  $('#impinfo').title = DATA.excelAt ? `取り込んだExcelの更新日時：${fmtShort(DATA.excelAt)}（火・土の夜にサーバーから複製、翌朝取り込み）` : '';
+  document.querySelectorAll('.chip[data-c]').forEach(ch => ch.querySelector('b').textContent = DATA.sitesX.filter(s => s.cat === ch.dataset.c).length);
+  render();
+  if (curSite && !isEditing()) openSite(curSite);
+}
+const splitW = v => String(v || '').split(/[、,，・\s]+/).filter(Boolean);
+// 日時の値は "2026-12-01T10:00:00"。時刻 00:00 は「時刻なし」として扱う
+const normF = v => (v === '○' ? '〇' : String(v || '')); // Excelの○は2種類ある
+const dPart = v =>String(v || '').slice(0, 10);
+const tPart = v => { const t = String(v || '').slice(11, 16); return t === '00:00' ? '' : t; };
+const fmtDT = v => v ? dPart(v).replace(/-/g, '/') + (tPart(v) ? ' ' + tPart(v) : '') : '';
+function endOfMonth(ym) { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m, 0); return `${y}-${String(m).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function visible(s, ignoreMoto = false) {
+  // 会議用は 60日/90日/120日/未定/完成済 と「未訪問のみ」を無視して全件（元請と検索だけ効く）
+  if (!MEET && !on[s.cat]) return false;
+  if (!MEET && unvisitedOnly && s.visits.length) return false;
+  if (motoF && s['元請'] !== motoF && !ignoreMoto) return false;
+  if (workerF && !splitW(s['職人']).includes(workerF)) return false;
+  if (q && !s['現場名'].includes(q) && !(s.alias || '').includes(q)) return false;
+  return true;
+}
+function render() {
+  layer.clearLayers(); markers = {};
+  DATA.sitesX.forEach(s => {
+    if (!visible(s) || s.lat == null) return;
+    const cls = ['pin', s.cat === '未定' ? 'non' : '', s.visits.length ? 'visited' : '', s.dueExact ? 'flag' : ''].join(' ');
+    // 消検日が日付で決まっている現場は、ピンの横に「消検 11/10」の札を付ける
+    // 消検が済んで建確が控えているときは「建確 11/20」
+    // 日付＋時刻（時刻が入っていれば）。例「建確 11/20 10:00」
+    const md = v => `${+dPart(v).slice(5, 7)}/${+dPart(v).slice(8, 10)}${tPart(v) ? ' ' + tPart(v) : ''}`;
+    const tag = s.phase === '建確' ? `<span class="ptag b">建確 ${md(s.ex['建築確認検査日'])}</span>` : s.dueExact && s.days >= 0 ? `<span class="ptag">消検 ${md(s.ex['消検日'])}</span>` : '';
+    const icon = L.divIcon({ className: 'pwrap', html: `<div class="${cls}" style="background:${COL[s.cat]}"></div>${tag}`, iconSize: [18, 18], iconAnchor: [9, 18] });
+    const m = L.marker([s.lat, s.lng], { icon }).on('click', () => openSite(s['現場名']));
+    m.bindTooltip(esc(s.alias || s['現場名']), { direction: 'top', offset: [0, -16] }); // 名前は必ずエスケープ（HTMLとして解釈させない）
+    layer.addLayer(m); markers[s['現場名']] = m;
+  });
+  renderList();
+}
+let sortKey = 'days', sortAsc = true; // 初期は残日順（近い順→消検済→未定→完成済）
+function renderList() {
+  const order = ['赤', '黄', '青', '灰', '消検済', '未定', '完成済'];
+  const pdfMark = s => s.drawings.length ? ` <span class="pdfmark" title="図面${s.drawings.length}件">📄${s.drawings.length}</span>` : '';
+  const nameCell = s => (s.alias ? `<b>${esc(s.alias)}</b>${pdfMark(s)}<small class="sub">${esc(s['現場名'])}</small>` : `<b>${esc(s['現場名'])}</b>${pdfMark(s)}`);
+  const dayTxt = s => s.days == null ? '' : s.days < 0 ? (s.cat === '消検済' ? '消検済' : '完成') : (s.phase === '建確' ? `建確まで${s.days}` : s.days);
+  let items = DATA.sitesX.filter(s => visible(s));
+  const dueNum = s => { const t = String(s.ex['消検日'] || s.due || '').replace(/\D/g, ''); return t ? Number(t.slice(0, 12).padEnd(12, '0')) : 9e15; }; // 消検の日時そのもの（未定は最後）
+  const keyf = { days: s => [order.indexOf(s.cat), s.days ?? 9e9], due: s => [0, dueNum(s)], name: s => s['現場名'], moto: s => [motoIdx(s['元請']), s.days ?? 9e9], last: s => s.visits[0]?.['日時'] || '', amount: s => [0, -(+s.amount || 0)] }[sortKey];
+  items.sort((a, b) => { const x = keyf(a), y = keyf(b); const r = Array.isArray(x) ? (x[0] - y[0] || x[1] - y[1]) : String(x).localeCompare(String(y), 'ja'); return sortAsc ? r : -r; });
+  const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? dayTxt(s) : s.phase === '建確' ? `建確あと${s.days}日` : 'あと' + s.days + '日') : ''}` : '未定';
+  const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div>${nameCell(s)}<small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}${MEET && s.amount !== '' ? `<br>${yen(s.amount)}千円` : ''}</div></div>`).join('');
+  const th = (k, t) => `<th data-k="${k}">${t}${sortKey === k ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>`;
+  const rows = items.map(s => `<tr data-s="${esc(s['現場名'])}"><td><i class="dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${COL[s.cat]}"></i></td><td class="nm">${nameCell(s)}${s['要確認'] ? ` <span style="color:var(--red)" title="${esc(s['要確認'])}">⚠</span>` : ''}</td><td>${esc(s['元請'])}</td><td>${esc(s['職人'])}</td><td>${s.due ? (s.dueExact ? esc(fmtDT(s.ex['消検日'])) : esc(s.due.slice(0, 7).replace('-', '/')) + '（月）') : '未定'}</td><td>${dayTxt(s)}</td><td>${esc(fmtDT(s.ex['建築確認検査日']))}</td><td class="fl">${FLAGS.filter(f => ['〇', '△'].includes(normF(s[f]))).map(f => f + (normF(s[f]) === '△' ? '△' : '')).join('・')}${s.ex['搬入'] ? '・搬入' : ''}</td><td>${s.visits.length ? s.visits[0]['日時'].slice(0, 10).replace(/-/g, '/') + ' ' + esc(s.visits[0]['建物進捗']) : ''}</td><td class="w">${esc(s.ex['工事進捗メモ'])}</td><td class="w">${esc(s['注意点'])}</td>${MEET ? `<td class="num">${yen(s.amount)}</td>` : ''}</tr>`).join('');
+  // 電気屋（元請）ボタン。件数は元請以外の絞り込みを効かせた数
+  const motoCount = {}, motoSum = {}; let motoAll = 0, sumAll = 0;
+  DATA.sitesX.forEach(s => { if (!visible(s, true)) return; motoAll++; sumAll += +s.amount || 0; motoCount[s['元請']] = (motoCount[s['元請']] || 0) + 1; motoSum[s['元請']] = (motoSum[s['元請']] || 0) + (+s.amount || 0); });
+  const sumTxt = n => MEET ? ` ／ ${yen(n)}千円` : '';
+  const shown = items.reduce((a, s) => a + (+s.amount || 0), 0);
+  const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}${sumTxt(sumAll)}</button>${Object.keys(motoCount).sort((a, b) => motoIdx(a) - motoIdx(b)).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}${sumTxt(motoSum[m])}</button>`).join('')}${MEET ? '<button id="printbtn" class="print">印刷</button>' : ''}</div>` +
+    (MEET ? `<div class="sumline"><b>会議用</b>　${new Date().toLocaleDateString('ja-JP')} 現在　${motoF ? esc(motoF) : '全元請'}　${items.length}件　合計 <b>${yen(shown)}</b> 千円<span class="pnote">（会議用は残り日数・未定・完成済に関係なく全件）</span></div>` : '');
+  const imp = DATA.importedAt ? `<div class="impline">Excel取り込み：${esc(DATA.importedAt.slice(0, 16).replace('T', ' '))}${DATA.excelAt ? `（Excelの更新 ${esc(DATA.excelAt.slice(0, 16).replace('T', ' '))}）` : ''}　火・土の夜に複製し、翌朝取り込みます</div>` : '';
+  $('#listpage').innerHTML = motobar + imp + (MEET ? monthTable() : '') + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
+    `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}${th('days', '残日')}<th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th>${MEET ? th('amount', '金額（千円）') : ''}</tr></thead><tbody>${rows}</tbody></table>`;
+  $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
+  $('#listpage').querySelectorAll('.motobar button[data-m]').forEach(el => el.onclick = () => { motoF = el.dataset.m; $('#moto').value = motoF; render(); });
+  if ($('#printbtn')) $('#printbtn').onclick = () => window.print();
+  setMB();
+  $('#listpage').querySelectorAll('th[data-k]').forEach(el => el.onclick = () => { if (sortKey === el.dataset.k) sortAsc = !sortAsc; else { sortKey = el.dataset.k; sortAsc = true; } renderList(); });
+}
+// 会議用：電気屋（元請）× 消検月 の金額（千円）。今年度4月〜3月。色チップや絞り込みに関係なく全物件で集計
+function monthTable() {
+  const now = new Date(), fy = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+  const months = Array.from({ length: 12 }, (_, i) => { const d = new Date(fy, 3 + i, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; });
+  const cols = [...months, '他年度', '未定'];
+  const cell = {}, rowSum = {}, colSum = {}, cnt = {}; let all = 0, allN = 0;
+  const inc = (k, v) => { cnt[k] = (cnt[k] || 0) + 1; return v; };
+  const motos = MOTO_ORDER;
+  DATA.sitesX.forEach(s => {
+    const v = +s.amount || 0; if (!v) return;
+    const ym = String(s['消検月'] || '').slice(0, 7);
+    const c = !ym ? '未定' : months.includes(ym) ? ym : '他年度';
+    const k = s['元請'] + '|' + c;
+    // 件数は金額が入っている物件だけ（Excelの「年間物件数（金額確定物件のみ）」と同じ数え方）
+    cell[k] = (cell[k] || 0) + inc(k, v); rowSum[s['元請']] = (rowSum[s['元請']] || 0) + inc('r|' + s['元請'], v); colSum[c] = (colSum[c] || 0) + inc('c|' + c, v); all += v; allN++;
+  });
+  const show = cols.filter(c => !['他年度', '未定'].includes(c) || colSum[c]); // 使っていない「他年度」「未定」は出さない
+  const head = c => c.length === 7 ? `${+c.slice(5)}月` : c;
+  const td = (v, n, cls = '') => `<td class="num ${cls}">${v ? `${yen(v)}<small>${n}件</small>` : ''}</td>`;
+  return `<div class="pvwrap"><div class="pvtitle">消検月別の金額（千円）　${fy}年度（${fy}年4月〜${fy + 1}年3月）</div><table class="pv"><thead><tr><th>元請</th>${show.map(c => `<th>${head(c)}</th>`).join('')}<th>合計</th></tr></thead><tbody>` +
+    motos.filter(m => rowSum[m]).map(m => `<tr${motoF === m ? ' class="sel"' : ''}><th>${esc(m)}</th>${show.map(c => td(cell[m + '|' + c], cnt[m + '|' + c])).join('')}${td(rowSum[m], cnt['r|' + m], 'tot')}</tr>`).join('') +
+    `<tr class="tot"><th>合計</th>${show.map(c => td(colSum[c], cnt['c|' + c])).join('')}${td(all, allN, 'tot')}</tr></tbody></table><div class="pnote" style="margin-top:4px">上段＝金額（千円）、下段＝件数（金額が入っている物件の数）</div></div>`;
+}
+// 表の見出しを電気屋ボタンの帯の下に貼り付ける（帯に隠れないように）。
+// 一覧が隠れている間は帯の高さが0なので、一覧を開いたとき・画面の大きさが変わったときにも測り直す
+function setMB() { const mb = $('#listpage .motobar'); if (mb && mb.offsetHeight) $('#listpage').style.setProperty('--mb', mb.offsetHeight + 'px'); }
+window.addEventListener('resize', setMB);
+function showTab(t) {
+  if (t === 'list') cancelPick();
+  document.body.classList.toggle('list', t === 'list');
+  if (t === 'list') setMB();
+  document.querySelectorAll('.tabs span').forEach(x => x.classList.toggle('on', x.dataset.t === t));
+  if (t === 'map') setTimeout(() => map.invalidateSize(), 50);
+}
+document.querySelectorAll('.tabs span').forEach(x => x.onclick = () => showTab(x.dataset.t));
+
+// ===== 物件シート =====
+function gpsText() {
+  if (!myPos) return '位置情報：取得中…';
+  const s = DATA.sitesX.find(x => x['現場名'] === curSite);
+  if (!s || s.lat == null) return `位置情報：取得済（精度±${Math.round(myPos.acc)}m）`;
+  const d = dist(myPos, s);
+  return `ピンから ${Math.round(d)}m（${d <= (DATA.radius || 300) ? '現地' : '現地外'}）`;
+}
+function openSite(name) {
+  const s = DATA.sitesX.find(x => x['現場名'] === name); if (!s) return;
+  if (curSite !== name) flushFlags();
+  cancelPick();
+  curSite = name;
+  $('#s_title').innerHTML = `${esc(s.alias || s['現場名'])}<small>${s.alias ? esc(s['現場名']) + ' ／ ' : ''}${esc(s['元請'])}${s['職人'] ? ' ／ ' + esc(s['職人']) : ''}</small>`;
+  const ex = s.ex, flags = flagSpans(s);
+  const dueTxt = s.due ? (s.dueExact ? esc(fmtDT(ex['消検日'])) + '（消検日）' : esc(s.due.slice(0, 7).replace('-', '/')) + '（消検月）') : '未定';
+  // Googleマップ：座標があれば座標、なければ住所で探す。どちらも無ければ出さない
+  const gq = s.lat != null ? `${s.lat},${s.lng}` : (s['住所'] ? encodeURIComponent(s['住所']) : '');
+  const daysLabel = s.days == null || s.days < 0 ? '' : s.phase === '建確' ? `建確まで あと${s.days}日` : `あと${s.days}日`;
+  // 写真は lh3 の直リンクで出す（drive.google.com の閲覧画面だとログインを求められる）
+  const img = (id, w) => `https://lh3.googleusercontent.com/d/${encodeURIComponent(id)}=w${w}`;
+  const hist = s.visits.length ? s.visits.map((v, i) => `<div class="v"><div class="d">${v['日時'].slice(0, 16).replace('T', ' ')} ${esc(v['記録者'])}${v['距離m'] !== '' && v['距離m'] != null ? ` ／ ${esc(v['距離m'])}m` : ''}${i === 0 ? ' <b>最終</b>' : ''}${!WORKER || v['記録者'] === DATA.me ? `<button class="del" data-i="${i}">削除</button>` : ''}</div><div class="s">${esc(v['建物進捗'])}</div><div>${esc(v['メモ']).replace(/\n/g, '<br>')}</div>${v['写真'] ? `<div class="ph">${String(v['写真']).split('\n').filter(Boolean).map(id => `<a href="${img(id, 1600)}" target="_blank"><img src="${img(id, 200)}" loading="lazy"></a>`).join('')}</div>` : ''}</div>`).join('') : '<div style="color:var(--muted)">まだ訪問記録がありません</div>';
+  $('#s_body').innerHTML = `
+  <div class="sec"><div class="row" style="justify-content:space-between"><span><span class="badge" style="background:${COL[s.cat]}">${LABEL[s.cat]}</span> ${daysLabel}</span>${gq ? `<a class="ext" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${gq}">Googleマップ ›</a>` : ''}</div>
+    <div class="kv" style="margin-top:8px"><b>消検</b><span>${dueTxt}</span>${ex['建築確認検査日'] ? `<b>建確</b><span>${esc(fmtDT(ex['建築確認検査日']))}</span>` : ''}<b>住所</b><span>${esc(s['住所']) || '未設定'}${s['要確認'] ? ` <span style="color:var(--red)">⚠${esc(s['要確認'])}</span>` : ''}</span>${fireFor(s['住所']) ? `<b>所轄</b><span>${fireFor(s['住所']).name}（<a href="tel:${fireFor(s['住所']).tel}">${fireFor(s['住所']).tel}</a>）</span>` : ''}${s['注意点'] ? `<b>注意点</b><span>${esc(s['注意点'])}</span>` : ''}${ex['工事進捗メモ'] ? `<b>工事進捗</b><span>${esc(ex['工事進捗メモ'])}</span>` : ''}</div>
+    <div class="flags" id="flags" style="margin-top:8px">${flags}</div><div class="gps flagnote" style="margin-top:3px">タップで 空→〇→／→△ と切り替わります（青枠＝アプリで変えたもの）</div></div>
+  <div class="row" style="gap:6px">${s['手入力'] ? '<span class="tag">アプリで追加</span>' : ''}<button class="btn sub sm" id="x_edit">編集</button>${s['手入力'] ? '<button class="btn sub sm danger" id="x_del">削除</button>' : ''}<button class="btn sub sm" id="x_loc">${s.lat == null ? '位置を設定' : '位置を直す'}</button></div>
+  <div class="sec" id="dwsec"><h3>図面（PDF）${s.drawings.length ? ` ${s.drawings.length}件` : ''}</h3>
+    <div class="dwlist">${s.drawings.map(x => `<div class="dw"><a href="#" data-id="${esc(x['ファイルID'])}" class="dwopen">📄 ${esc(x['ファイル名'])}</a><small>${esc(x['サイズKB'])}KB・${esc(String(x['登録日時']).slice(5, 10).replace('-', '/'))} ${esc(x['登録者'])}</small><button class="del dwdel" data-id="${esc(x['ファイルID'])}" data-n="${esc(x['ファイル名'])}">削除</button></div>`).join('') || '<div class="gps">まだありません</div>'}</div>
+    <label class="dwdrop" id="dwdrop">PDFをここにドロップ（またはタップして選ぶ）<input type="file" id="dwfile" accept="application/pdf,.pdf" multiple hidden></label>
+    <div class="gps">消防検査から30日たつと自動でドライブのゴミ箱へ移ります（30日以内なら戻せます）</div></div>
+  <div class="sec"><h3>訪問を記録</h3>
+    <div class="row"><label>建物の進捗</label><select class="f" id="v_stage"><option value="">選択</option>${STAGES.map(x => `<option>${x}</option>`).join('')}</select></div>
+    <textarea id="v_memo" placeholder="メモ"></textarea>
+    <div class="row"><input type="file" id="v_photo" accept="image/*" multiple style="font-size:12px"></div>
+    <div class="row" style="justify-content:space-between"><span class="gps" id="gps">${gpsText()}</span><button class="btn" id="v_send">記録する</button></div></div>
+  <div class="sec"><h3>訪問履歴（${s.visits.length}件）</h3><div class="hist">${hist}</div></div>
+  <div class="sec"><h3>物件情報（手入力）</h3>
+    <label class="fl2">正式名称（物件名が決まったら）<input class="f" id="e_alias" value="${esc(s.alias)}" placeholder="例：〇〇マンション北2条"></label>
+    <div class="row dt"><label>消検日</label><input type="date" id="e_fire" value="${esc(dPart(ex['消検日']))}"><input type="time" id="e_fireT" value="${esc(tPart(ex['消検日']))}"><button class="clr" data-c="e_fire">×</button></div>
+    <div class="row dt"><label>建築確認検査日</label><input type="date" id="e_bldg" value="${esc(dPart(ex['建築確認検査日']))}"><input type="time" id="e_bldgT" value="${esc(tPart(ex['建築確認検査日']))}"><button class="clr" data-c="e_bldg">×</button></div>
+    <div class="gps">時刻は分かるときだけ。×で日時を消して保存すると空欄に戻ります</div>
+    <textarea id="e_prog" placeholder="自社工事の進捗メモ（配線済・器具待ち など）">${esc(ex['工事進捗メモ'])}</textarea>
+    <div class="row" style="justify-content:flex-end"><button class="btn sub" id="e_save">保存</button></div>
+    ${ex['更新日時'] ? `<div class="gps">最終更新 ${esc(String(ex['更新日時']).slice(0, 16).replace('T', ' '))} ${esc(ex['更新者'])}</div>` : ''}</div>`;
+  $('#sheet').classList.add('open');
+  // 職人は物件情報を見るだけ（入力欄を触れなくする。サーバー側でも保存を断る）
+  if (WORKER) $('#s_body').querySelectorAll('#e_alias,#e_fire,#e_fireT,#e_bldg,#e_bldgT,#e_prog').forEach(el => (el.disabled = true));
+  extraInit = extraValues(); // 開いた時点の値。保存のときは変えた項目だけ送る
+  $('#v_send').onclick = () => sendVisit(s);
+  $('#x_loc').onclick = () => openForm('loc', s);
+  bindFlags(s);
+  bindDrawings(s);
+  $('#x_edit').onclick = () => openForm('edit', s); // Excelの物件も編集できる（アプリの値はExcelでその欄が変わるまで優先）
+  if (s['手入力']) $('#x_del').onclick = () => delSite(s);
+  $('#s_body').querySelectorAll('button.del').forEach(b => b.onclick = () => delVisit(s, s.visits[+b.dataset.i]));
+  $('#e_save').onclick = () => saveExtra(s);
+  $('#s_body').querySelectorAll('button.clr').forEach(b => b.onclick = () => { $('#' + b.dataset.c).value = ''; $('#' + b.dataset.c + 'T').value = ''; });
+}
+// Supabase の関数を呼ぶ
+async function rpc(fn, args) {
+  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { apikey: SB_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message || `通信エラー（${r.status}）`);
+  return j;
+}
+// GAS（写真・図面のドライブ保存）
+async function gas(body) {
+  body.pw = store.get('pw');
+  const r = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) });
+  const j = await r.json(); if (!j.ok) throw new Error(j.error || '失敗'); return j;
+}
+// 書き込み。action と中身は GAS 版と同じ（Supabase の act 関数が受ける）
+async function post(body) {
+  const { action, ...b } = body;
+  if (action === 'visit' && (b.photos || []).filter(Boolean).length) {
+    // 写真は先にドライブへ（GAS）。返ってきたIDを記録に付ける
+    b.photoIds = (await gas({ action: 'sbPhotos', site: b.site, photos: b.photos.filter(Boolean) })).ids;
+  }
+  delete b.photos;
+  if (action === 'addDrawing') {
+    const f = (await gas({ action: 'sbDrawing', site: b.site, name: b.name, data: b.data })).file;
+    b.id = f.id; b.name = f.name; b.kb = f.kb; delete b.data;
+  }
+  if ((action === 'addSite' || action === 'setLocation') && b.lat == null) {
+    // 住所から位置を出す（国土地理院の住所検索）。住所が空なら現場名から推定
+    if (action === 'addSite' && !b.addr) b.addr = nameToAddress(norm(b.name));
+    const g = b.addr ? await geocodeAddr(b.addr) : null;
+    if (g) { b.lat = g.lat; b.lng = g.lng; }
+  }
+  if (action === 'addSite') b.name = norm(b.name);
+  const j = await rpc('act', { p_pw: store.get('pw'), p_user: store.get('user') || '', p_action: action, p_body: b });
+  if (!j.ok) throw new Error(j.error || '失敗');
+  return j;
+}
+async function geocodeAddr(addr) {
+  try {
+    const a = await (await fetch('https://msearch.gsi.go.jp/address-search/AddressSearch?q=' + encodeURIComponent(addr))).json();
+    if (a && a.length) return { lat: a[0].geometry.coordinates[1], lng: a[0].geometry.coordinates[0] };
+  } catch (e) {}
+  return null;
+}
+// 全角英数→半角、全角スペース→半角（GAS版の norm と同じ）
+function norm(s) { return String(s ?? '').replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/　/g, ' ').trim(); }
+// 現場名 → 住所（GAS版の nameToAddress と同じ。札幌の条丁目表記を読む。読めなければ ''）
+const KU = { '美園': '豊平区', '平岸': '豊平区', '月寒西': '豊平区', '月寒東': '豊平区', '中の島': '豊平区', '西岡': '豊平区', '福住': '豊平区', '豊平': '豊平区',
+  '東札幌': '白石区', '菊水': '白石区', '発寒': '西区', '二十四軒': '西区', '西野': '西区', '新琴似': '北区', '澄川': '南区', '宮の森': '中央区',
+  '厚別中央': '厚別区', '宮の沢': '手稲区', '手稲本町': '手稲区', '本町': '東区' };
+function nameToAddress(name) {
+  let n = norm(name), m;
+  if (/^(千歳市|恵庭市|北広島市|江別市)/.test(n)) return '北海道' + n.replace(/(MS|マンション|賃貸MS|の集合住宅|ホテル|PROJECT|計画).*$/, '').replace(/\s*[A-D]棟$/, '');
+  n = n.replace(/^(GA-|PS-|LE-|NUTS-|CORE-|CORE )/, '');
+  n = n.replace(/(MS|BL)?\s*(②|ⅲ|Ⅲ|\(A棟\)|\(B棟\)|[A-D]棟|東棟|西棟|賃貸MS|賃貸|の集合住宅|マンション|HOTEL|ホテル|学生寮|民泊|MS).*$/, '').trim();
+  const kuFor = (ns, j, ew) => ns === '南' ? '中央区' : ew === '東' ? (j >= 6 ? '東区' : '中央区') : (j >= 10 ? '北区' : '中央区');
+  if ((m = /^([SN])(\d+)([EW])(\d+)/.exec(n))) { const ns = m[1] === 'S' ? '南' : '北', ew = m[3] === 'E' ? '東' : '西'; return `北海道札幌市${kuFor(ns, +m[2], ew)}${ns}${m[2]}条${ew}${m[4]}丁目`; }
+  if ((m = /^([南北])\s*(\d+)\s*条?\s*([東西])\s*(\d+)/.exec(n))) return `北海道札幌市${kuFor(m[1], +m[2], m[3])}${m[1]}${m[2]}条${m[3]}${m[4]}丁目`;
+  if ((m = /^(麻生町?)\s*(\d+)/.exec(n))) return `北海道札幌市北区麻生町${m[2]}丁目`;
+  if ((m = /^(本通|本郷通|南郷通)り?\s*(\d+)丁目?\s*([南北])?/.exec(n))) return `北海道札幌市白石区${m[1]}${m[2]}丁目${m[3] || ''}`;
+  if ((m = /^(栄通|西町北|厚別南|青葉町)\s*(\d+)/.exec(n))) return `北海道札幌市${{ '栄通': '白石区', '西町北': '西区', '厚別南': '厚別区', '青葉町': '厚別区' }[m[1]]}${m[1]}${m[2]}丁目`;
+  if ((m = /^白石中央\s*(\d+)-(\d+)/.exec(n))) return `北海道札幌市白石区中央${m[1]}条${m[2]}丁目`;
+  if ((m = /^月寒中央通\s*(\d+)/.exec(n))) return `北海道札幌市豊平区月寒中央通${m[1]}丁目`;
+  if ((m = /^([一-龥ぁ-んァ-ンの]+?)\s*(\d+)\s*(?:-|条)\s*(\d+)/.exec(n))) return `北海道札幌市${KU[m[1]] || ''}${m[1]}${m[2]}条${m[3]}丁目`;
+  if (/^中央区/.test(n)) return '北海道札幌市' + n;
+  return '';
+}
+async function sendVisit(s) {
+  const btn = $('#v_send'); const stage = $('#v_stage').value, memo = $('#v_memo').value.trim();
+  if (!stage && !memo && !$('#v_photo').files.length) return toast('進捗かメモを入れてください');
+  btn.disabled = true; btn.textContent = '送信中…';
+  try {
+    const photos = []; for (const f of $('#v_photo').files) photos.push(await shrink(f));
+    const body = { action: 'visit', site: s['現場名'], stage, memo, photos };
+    if (myPos) { body.lat = myPos.lat; body.lng = myPos.lng; if (s.lat != null) body.dist = dist(myPos, s); }
+    await post(body); toast('記録しました'); await load(true);
+  } catch (e) { toast('送信失敗：' + e.message); btn.disabled = false; btn.textContent = '記録する'; }
+}
+async function delVisit(s, v) {
+  if (!v) return;
+  const n = String(v['写真'] || '').split('\n').filter(Boolean).length;
+  if (!confirm(`${v['日時'].slice(0, 16).replace('T', ' ')} ${v['記録者']} の記録を削除します。${n ? `\n写真${n}枚もドライブのゴミ箱へ移します。` : ''}\nよろしいですか？`)) return;
+  try { await post({ action: 'deleteVisit', site: s['現場名'], at: v['日時'], by: v['記録者'] }); toast('削除しました'); await load(true); }
+  catch (e) { toast('削除失敗：' + e.message); }
+}
+// ===== 図面PDF =====
+// ドロップ（PC）・選択（スマホ）で保存。開くときはアプリ経由で取り出す（ドライブの共有リンクは作らない）
+function bindDrawings(s) {
+  const drop = $('#dwdrop'), input = $('#dwfile');
+  input.onchange = () => { uploadDrawings(s, [...input.files]); input.value = ''; };
+  // パネルのどこに落としても受け取る（ブラウザがPDFを開いてしまわないように）
+  const body = $('#s_body');
+  body.ondragover = e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); drop.classList.add('over'); } };
+  body.ondragleave = e => { if (!body.contains(e.relatedTarget)) drop.classList.remove('over'); };
+  body.ondrop = e => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); drop.classList.remove('over'); uploadDrawings(s, [...e.dataTransfer.files]); };
+  body.querySelectorAll('a.dwopen').forEach(a => a.onclick = e => { e.preventDefault(); openDrawing(a.dataset.id, a.textContent); });
+  body.querySelectorAll('button.dwdel').forEach(b => b.onclick = () => delDrawing(b.dataset.id, b.dataset.n));
+}
+// パネルの外（地図など）に落としたとき、ブラウザがPDFを開いてアプリから離れてしまうのを止める
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => { if (!$('#s_body').contains(e.target)) { e.preventDefault(); if (e.dataTransfer?.files?.length) toast('図面は物件の詳細パネルに落としてください'); } });
+const readB64 = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });
+async function uploadDrawings(s, files) {
+  const pdfs = files.filter(f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  if (!pdfs.length) return toast('PDFだけ保存できます');
+  const big = pdfs.find(f => f.size > 25 * 1024 * 1024); if (big) return toast(`${big.name} は大きすぎます（25MBまで）`);
+  const drop = $('#dwdrop'); drop.classList.add('busy');
+  let ok = 0;
+  for (const f of pdfs) {
+    drop.firstChild.textContent = `保存中… ${f.name}（${ok + 1}/${pdfs.length}）`;
+    try { await post({ action: 'addDrawing', site: s['現場名'], name: f.name, data: await readB64(f) }); ok++; }
+    catch (e) { toast(`${f.name} を保存できません：${e.message}`); }
+  }
+  toast(`図面を${ok}件保存しました`); await load(true);
+}
+// 図面はドライブのビューアで直接開く（2026-11-10〜。図面は「リンクを知っている人は閲覧可」。GASを通すと10秒前後かかったため）
+function openDrawing(id) {
+  window.open(`https://drive.google.com/file/d/${encodeURIComponent(id)}/preview`, '_blank', 'noopener');
+}
+async function delDrawing(id, name) {
+  if (!confirm(`図面「${name}」を削除します。\nドライブのゴミ箱へ移します（30日以内なら戻せます）。\nよろしいですか？`)) return;
+  try { await post({ action: 'deleteDrawing', id }); toast('削除しました'); await load(true); }
+  catch (e) { toast('削除失敗：' + e.message); }
+}
+
+// 物件情報の入力欄の今の値
+let extraInit = null;
+function extraValues() {
+  if (!$('#e_fire')) return null;
+  return { fire: $('#e_fire').value + ' ' + $('#e_fireT').value, bldg: $('#e_bldg').value + ' ' + $('#e_bldgT').value, prog: $('#e_prog').value.trim(), alias: $('#e_alias').value.trim() };
+}
+// 開いたときから変わった項目だけ（送信用）。入力欄が無ければ null
+function extraChanged() {
+  const now = extraValues(); if (!now || !extraInit) return null;
+  const b = {};
+  if (now.fire !== extraInit.fire) { b.fireDate = $('#e_fire').value; b.fireTime = $('#e_fireT').value; }
+  if (now.bldg !== extraInit.bldg) { b.bldgDate = $('#e_bldg').value; b.bldgTime = $('#e_bldgT').value; }
+  if (now.prog !== extraInit.prog) b.progress = now.prog;
+  if (now.alias !== extraInit.alias) b.alias = now.alias;
+  return b;
+}
+async function saveExtra(s) {
+  const changed = extraChanged() || {};
+  if (!Object.keys(changed).length) return toast('変更はありません');
+  const btn = $('#e_save'); btn.disabled = true;
+  try {
+    // 変えた項目だけ送る（開きっぱなしの間に別の人が入れた値を、古い値で戻さない）
+    await post({ action: 'extra', site: s['現場名'], ...changed });
+    extraInit = extraValues();
+    toast('保存しました'); await load(true);
+  } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
+}
+// ===== 図面〜下検査の切り替え =====
+const FLAG_CYCLE = ['', '〇', '／', '△'];
+// 搬入も同じ並びで切り替える（保存先は物件追加の「搬入」列。Excelには無い項目）
+const FLAG_CLS = { '〇': 'on', '／': 'na', '△': 'tri' };
+const flagVal = (s, f) => f === '搬入' ? normF(s.ex['搬入']) : normF(s[f]);
+function flagSpans(s) {
+  return FLAGS.concat('搬入').map(f => { const v = flagVal(s, f); return `<span class="tap ${FLAG_CLS[v] || ''}${s['アプリ_' + f] ? ' app' : ''}" data-f="${f}">${f}${esc(v)}</span>`; }).join('');
+}
+// 送る待ちの切り替え（0.8秒まとめ）。パネルを閉じる・別の物件を開くときはすぐ送る
+const flagTimers = {};
+function flushFlags() { Object.keys(flagTimers).forEach(k => { const t = flagTimers[k]; delete flagTimers[k]; clearTimeout(t.id); t.fn(); }); }
+function bindFlags(s) {
+  if (WORKER) return; // 職人は見るだけ
+  $('#flags').querySelectorAll('span.tap').forEach(el => el.onclick = () => {
+    const f = el.dataset.f;
+    const nx = FLAG_CYCLE[(FLAG_CYCLE.indexOf(flagVal(s, f)) + 1) % FLAG_CYCLE.length];
+    if (f === '搬入') {
+      // 搬入は物件追加に保存。元データ（DATA.extra）も直して、再描画で戻らないようにする
+      s.ex['搬入'] = nx;
+      let e = (DATA.extra || []).find(x => x['現場名'] === s['現場名']); if (!e) { e = { '現場名': s['現場名'] }; (DATA.extra = DATA.extra || []).push(e); } e['搬入'] = nx;
+    } else {
+      if (!(('元_' + f) in s)) s['元_' + f] = String(s[f] || ''); // Excelの値（最初の1回だけ控える）
+      s[f] = nx; s['アプリ_' + f] = nx !== normF(s['元_' + f]) ? 1 : 0;
+      // 元データ（DATA.sites）にも反映して、一覧や再描画で戻らないようにする
+      const raw = DATA.sites.find(x => x['現場名'] === s['現場名']); if (raw) { raw[f] = nx; raw['元_' + f] = s['元_' + f]; raw['アプリ_' + f] = s['アプリ_' + f]; }
+    }
+    $('#flags').innerHTML = flagSpans(s); bindFlags(s);
+    // 続けてタップしても最後の値だけ送る
+    const key = s['現場名'] + '|' + f;
+    if (flagTimers[key]) clearTimeout(flagTimers[key].id);
+    const req = f === '搬入' ? { action: 'extra', site: s['現場名'], delivery: nx } : { action: 'setFlag', site: s['現場名'], key: f, value: nx };
+    const fn = () => { delete flagTimers[key]; post(req)
+      .then(() => { saveCache(); toast(`${f}：${nx || '空欄'} を保存しました`); renderList(); })
+      .catch(e => toast(`${f} の保存に失敗：` + e.message)); };
+    flagTimers[key] = { id: setTimeout(fn, 800), fn };
+  });
+}
+
+// ===== 物件の追加・編集・位置 =====
+// draft: 入力途中の内容。地図タップで位置を選ぶあいだ、フォームを閉じても残す
+let draft = null;
+// 「地図をタップして決める」の待ち受け。別の操作をしたら必ず解除する（残ると後で勝手にフォームが開く）
+let pickHandler = null;
+function cancelPick() {
+  if (pickHandler) { map.off('click', pickHandler); pickHandler = null; }
+  map.getContainer().style.cursor = '';
+  $('#pickbar').style.display = 'none';
+}
+function openForm(mode, s) {
+  flushFlags(); cancelPick();
+  if (!draft || draft.mode !== mode || draft.site !== (s ? s['現場名'] : '')) {
+    draft = { mode, site: s ? s['現場名'] : '', name: s ? s['現場名'] : '', moto: s ? s['元請'] : '', worker: s ? s['職人'] : '', ym: s && s['消検月'] ? String(s['消検月']).slice(0, 7) : '', note: s ? s['注意点'] : '', addr: s ? s['住所'] : '', lat: undefined, lng: undefined, how: '',
+      flags: Object.fromEntries(FLAGS.concat('搬入').map(f => [f, s ? flagVal(s, f) : ''])), amount: s && s.amount !== '' && s.amount != null ? String(s.amount) : '' };
+    draft.init = JSON.parse(JSON.stringify({ moto: draft.moto, worker: draft.worker, ym: draft.ym, note: draft.note, flags: draft.flags, amount: draft.amount })); // 編集：変えた項目だけ送るため
+  }
+  const d = draft, full = mode !== 'loc', withPos = mode !== 'edit';
+  curSite = null;
+  // プルダウンの候補：元請・職人は今のデータから、消検月は今年度の4月から2年先まで
+  const uniq = a => [...new Set(a.filter(Boolean))].sort((x, y) => x.localeCompare(y, 'ja'));
+  const motos = MOTO_ORDER.filter(m => m !== '（元請なし）'); // Excelのシート順
+  const workers = uniq(DATA.sitesX.flatMap(x => String(x['職人'] || '').split(/[、,，・\s]+/)).concat(DATA.staff || []));
+  const now = new Date(), y0 = now.getMonth() < 3 ? now.getFullYear() - 1 : now.getFullYear();
+  const months = []; for (let i = 0; i < 36; i++) { const d = new Date(y0, 3 + i, 1); if (d > new Date(now.getFullYear() + 2, now.getMonth(), 1)) break; months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`); }
+  const [w1 = '', w2 = ''] = String(d.worker || '').split(/[、,，・\s]+/);
+  const opts = (list, cur, blank) => { const l = cur && !list.includes(cur) ? [cur, ...list] : list; return `<option value="">${blank}</option>` + l.map(v => `<option${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join(''); };
+  const mopts = cur => `<option value="">未定</option>` + (cur && !months.includes(cur) ? [cur, ...months] : months).map(v => `<option value="${v}"${v === cur ? ' selected' : ''}>${v.slice(0, 4)}年${+v.slice(5)}月</option>`).join('');
+  $('#s_title').innerHTML = { add: '物件を追加', edit: '物件を編集', loc: '位置を直す' }[mode] + (mode !== 'add' ? `<small>${esc(d.site)}</small>` : '');
+  $('#s_body').innerHTML = `<div class="sec">
+    ${mode === 'add' ? `<label class="fl2">現場名（必須）<input class="f" id="f_name" value="${esc(d.name)}" placeholder="例：北2西22MS"></label>` : ''}
+    ${full ? `<label class="fl2">元請（必須）<select class="f" id="f_moto">${opts(motos, d.moto === '（元請なし）' ? '' : d.moto, '選んでください')}</select></label>
+    <label class="fl2">職人<span class="row" style="flex-wrap:nowrap"><select class="f" id="f_w1">${opts(workers, w1, '選んでください')}</select><select class="f" id="f_w2">${opts(workers, w2, '（2人目なし）')}</select></span></label>
+    <label class="fl2">消検月<select class="f" id="f_ym">${mopts(d.ym)}</select></label>
+    <label class="fl2">注意点<textarea id="f_note">${esc(d.note)}</textarea></label>
+    <div class="fl2">図面〜搬入（タップで 空→〇→／→△）<div class="flags" id="f_flags">${formFlags(d)}</div></div>
+    ${MEET ? `<label class="fl2">金額（千円）<input class="f" id="f_amount" inputmode="decimal" value="${esc(d.amount)}" placeholder="例：1340"></label>` : '<div class="gps">金額は会議用パスワードで入ったときに入力できます</div>'}
+    ${mode === 'edit' && !s['手入力'] ? '<div class="gps">Excelの物件です。ここで変えた値は、Excelでその欄が書き換えられるまで優先されます（書き換えられたらExcelの値に戻ります）</div>' : ''}` : ''}
+    ${withPos ? `<label class="fl2">住所<input class="f" id="f_addr" value="${esc(d.addr)}" placeholder="例：札幌市中央区北2条西22丁目（空なら現場名から推定）"></label>
+    <div class="row"><button class="btn sub sm" id="f_here">現在地にする</button><button class="btn sub sm" id="f_pick">地図をタップして決める</button></div>
+    <div class="gps" id="f_pos">${d.lat != null ? `位置：${d.how}（${(+d.lat).toFixed(5)}, ${(+d.lng).toFixed(5)}）<a href="#" id="f_clr">取り消す</a>` : '位置：住所から自動で決めます'}</div>` : ''}
+    <div class="row" style="justify-content:flex-end"><button class="btn sub" id="f_cancel">やめる</button><button class="btn" id="f_save">${mode === 'add' ? '追加する' : '保存'}</button></div></div>`;
+  $('#sheet').classList.add('open');
+  const keep = () => {
+    ['name', 'moto', 'ym', 'note', 'addr', 'amount'].forEach(k => { const el = $('#f_' + k); if (el) d[k] = el.value.trim(); });
+    if ($('#f_w1')) d.worker = [...new Set([$('#f_w1').value, $('#f_w2').value].filter(Boolean))].join('、');
+  };
+  const bindFormFlags = () => { const box = $('#f_flags'); if (!box) return; box.querySelectorAll('span.tap').forEach(el => el.onclick = () => {
+    const f = el.dataset.f; d.flags[f] = FLAG_CYCLE[(FLAG_CYCLE.indexOf(d.flags[f] || '') + 1) % FLAG_CYCLE.length];
+    box.innerHTML = formFlags(d); bindFormFlags();
+  }); };
+  bindFormFlags();
+  if (!withPos) { /* 編集は位置の欄なし（位置は「位置を直す」で） */ } else $('#f_here').onclick = () => {
+    keep();
+    if (!myPos) { toast('位置情報がまだ取れていません'); return; }
+    d.lat = myPos.lat; d.lng = myPos.lng; d.how = '現在地'; openForm(mode, s);
+  };
+  if (withPos) $('#f_pick').onclick = () => {
+    keep(); showTab('map'); $('#sheet').classList.remove('open');
+    cancelPick();
+    map.getContainer().style.cursor = 'crosshair';
+    $('#pickbar').style.display = 'flex';
+    $('#pickcancel').onclick = () => { cancelPick(); openForm(mode, s); }; // やめたらフォームに戻る（入力は残る）
+    pickHandler = e => { cancelPick(); d.lat = e.latlng.lat; d.lng = e.latlng.lng; d.how = '地図で指定'; openForm(mode, s); };
+    map.on('click', pickHandler);
+  };
+  const clr = $('#f_clr'); if (clr) clr.onclick = e => { e.preventDefault(); keep(); d.lat = d.lng = undefined; openForm(mode, s); };
+  $('#f_cancel').onclick = () => { draft = null; if (s) openSite(s['現場名']); else $('#sheet').classList.remove('open'); };
+  $('#f_save').onclick = async () => {
+    keep();
+    if (full && !d.moto) return toast('元請を選んでください');
+    if (MEET && d.amount !== '' && !/^\d+(\.\d+)?$/.test(d.amount)) return toast('金額は数字（千円）で入れてください');
+    // 位置を直す：何も選ばず住所も変えていなければ送らない（手で決めた座標を住所の推定で上書きしない）
+    if (mode === 'loc' && d.lat == null && (d.addr || '') === (s && s['住所'] || '')) return toast('住所を変えるか、現在地・地図タップで位置を選んでください');
+    const btn = $('#f_save'); btn.disabled = true;
+    try {
+      let j = {};
+      if (mode === 'edit') {
+        // 変えた項目だけ送る
+        const fields = {}, ini = d.init;
+        if (d.moto !== ini.moto) fields['元請'] = d.moto;
+        if (d.worker !== ini.worker) fields['職人'] = d.worker;
+        if (d.ym !== ini.ym) fields['消検月'] = d.ym;
+        if (String(d.note || '') !== String(ini.note || '')) fields['注意点'] = d.note;
+        FLAGS.forEach(f => { if (d.flags[f] !== ini.flags[f]) fields[f] = d.flags[f]; });
+        if (MEET && d.amount !== ini.amount) fields['金額'] = d.amount;
+        const deliv = d.flags['搬入'] !== ini.flags['搬入'];
+        if (!Object.keys(fields).length && !deliv) { btn.disabled = false; return toast('変更はありません'); }
+        if (Object.keys(fields).length) j = await post({ action: 'editSite', site: d.site, fields });
+        if (deliv) await post({ action: 'extra', site: d.site, delivery: d.flags['搬入'] });
+      } else {
+        const body = { site: d.site, name: d.name, moto: d.moto, worker: d.worker, ym: d.ym, note: d.note, addr: d.addr };
+        if (d.lat != null) { body.lat = d.lat; body.lng = d.lng; }
+        if (mode === 'add') {
+          body.fields = {}; FLAGS.forEach(f => { if (d.flags[f]) body.fields[f] = d.flags[f]; });
+          if (MEET && d.amount !== '') body.fields['金額'] = d.amount;
+        }
+        body.action = { add: 'addSite', loc: 'setLocation' }[mode];
+        j = await post(body);
+        if (mode === 'add' && d.flags['搬入']) await post({ action: 'extra', site: j.name, delivery: d.flags['搬入'] });
+      }
+      const name = mode === 'add' ? j.name : d.site; draft = null;
+      toast(j.lat === '' ? '保存しました（位置は未設定）' : '保存しました');
+      await load(true); openSite(name);
+      const m = markers[name]; if (m) map.setView(m.getLatLng(), Math.max(map.getZoom(), 15));
+    } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
+  };
+}
+// ===== 管理（会議用パスワードのときだけ）：職人の追加・パスワード =====
+const genPw = () => { const c = 'abcdefghjkmnpqrstuvwxyz23456789', a = new Uint32Array(8); crypto.getRandomValues(a); return [...a].map(x => c[x % c.length]).join(''); };
+async function openAdmin() {
+  flushFlags(); cancelPick(); curSite = null;
+  $('#s_title').innerHTML = '管理<small>職人とパスワード（会議用で入ったときだけ）</small>';
+  $('#s_body').innerHTML = '<div class="sec">読み込み中…</div>'; $('#sheet').classList.add('open');
+  let j; try { j = await post({ action: 'listAccounts' }); } catch (e) { $('#s_body').innerHTML = `<div class="sec">${esc(e.message)}</div>`; return; }
+  const row = a => `<tr data-n="${esc(a.name)}"><td><input class="a_name" value="${esc(a.name)}"></td><td><input class="a_pw" value="${esc(a.pw)}"></td><td><input class="a_w" value="${esc(a.worker)}"></td>
+    <td class="b"><button class="btn sub sm a_gen">作る</button> <button class="btn sm a_save">保存</button> <button class="del a_del">削除</button></td></tr>`;
+  $('#s_body').innerHTML = `
+  <div class="sec"><h3>職人（${j.accounts.length}人）</h3>
+    <table class="adm"><thead><tr><th>名前</th><th>パスワード</th><th>担当名</th><th></th></tr></thead><tbody>${j.accounts.map(row).join('')}</tbody></table>
+    <div class="gps" style="margin-top:6px">担当名＝Excel・物件の「職人」欄に書く名前（その名前の物件だけが見えます）。パスワードを空にすると、ログインはできず職人の候補にだけ出ます。「作る」でパスワードを自動で作ります（保存を押すまで変わりません）</div></div>
+  <div class="sec"><h3>職人を追加</h3>
+    <table class="adm"><tbody><tr><td><input id="n_name" placeholder="名前（例：阿部）"></td><td><input id="n_pw" placeholder="パスワード"></td><td><input id="n_w" placeholder="担当名（空なら名前）"></td>
+    <td class="b"><button class="btn sub sm" id="n_gen">作る</button> <button class="btn sm" id="n_add">追加</button></td></tr></tbody></table></div>
+  <div class="sec"><h3>共通のパスワード</h3>
+    <table class="adm"><tbody>
+    <tr><td style="width:7em">普段用</td><td><input id="p_normal" value="${esc(j.normalPw)}"></td><td class="b"><button class="btn sm" id="p_normal_s">変更</button></td></tr>
+    <tr><td>会議用</td><td><input id="p_meeting" value="${esc(j.meetingPw)}"></td><td class="b"><button class="btn sm" id="p_meeting_s">変更</button></td></tr></tbody></table>
+    <div class="gps">普段用を変えると、小松さん・徳田さんなど普段用で入っている人は次に開いたとき入り直しになります。会議用を変えると、この端末は新しいパスワードで入り直します</div></div>`;
+  const run = async (body, msg) => { try { await post(body); toast(msg); await load(true); openAdmin(); } catch (e) { toast(e.message); } };
+  $('#s_body').querySelectorAll('tr[data-n]').forEach(tr => {
+    const v = c => tr.querySelector(c).value.trim();
+    tr.querySelector('.a_gen').onclick = () => { tr.querySelector('.a_pw').value = genPw(); };
+    tr.querySelector('.a_save').onclick = () => run({ action: 'saveAccount', oldName: tr.dataset.n, name: v('.a_name'), newPw: v('.a_pw'), worker: v('.a_w') }, '保存しました');
+    tr.querySelector('.a_del').onclick = () => { if (confirm(`職人「${tr.dataset.n}」を削除します（ログインできなくなります。物件や訪問記録は消えません）。よろしいですか？`)) run({ action: 'deleteAccount', name: tr.dataset.n }, '削除しました'); };
+  });
+  $('#n_gen').onclick = () => { $('#n_pw').value = genPw(); };
+  $('#n_add').onclick = () => run({ action: 'saveAccount', isNew: true, name: $('#n_name').value.trim(), newPw: $('#n_pw').value.trim(), worker: $('#n_w').value.trim() }, '追加しました');
+  const shared = kind => async () => {
+    const pw = $('#p_' + kind).value.trim();
+    if (!confirm(`${kind === 'meeting' ? '会議用' : '普段用'}のパスワードを「${pw}」に変えます。よろしいですか？`)) return;
+    try { await post({ action: 'setSharedPw', kind, newPw: pw }); if (kind === 'meeting') store.set('pw', pw); toast('変更しました'); await load(true); openAdmin(); } catch (e) { toast(e.message); }
+  };
+  $('#p_normal_s').onclick = shared('normal'); $('#p_meeting_s').onclick = shared('meeting');
+}
+$('#admin').onclick = openAdmin;
+
+// フォームの切り替えボタン（図面〜搬入）
+function formFlags(d) {
+  return FLAGS.concat('搬入').map(f => { const v = d.flags[f] || ''; const changed = d.init && v !== d.init.flags[f]; return `<span class="tap ${FLAG_CLS[v] || ''}${changed ? ' app' : ''}" data-f="${f}">${f}${esc(v)}</span>`; }).join('');
+}
+async function delSite(s) {
+  if (!confirm(`「${s['現場名']}」を一覧から削除します。\n訪問記録と物件情報は残ります（同じ名前で追加し直せば戻ります）。\nよろしいですか？`)) return;
+  try { await post({ action: 'deleteSite', site: s['現場名'] }); toast('削除しました'); $('#sheet').classList.remove('open'); curSite = null; await load(true); }
+  catch (e) { toast('削除失敗：' + e.message); }
+}
+$('#addsite').onclick = () => { draft = null; openForm('add', null); };
+$('#worker').onchange = e => { workerF = e.target.value; render(); };
+
+function shrink(file) {
+  return new Promise(res => {
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const max = 1280, r = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', 0.75));
+    };
+    img.onerror = () => res(null); img.src = url;
+  });
+}
+
+// ===== UI =====
+document.querySelectorAll('.chip[data-c]').forEach(ch => ch.onclick = () => { const c = ch.dataset.c; on[c] = !on[c]; ch.classList.toggle('off', !on[c]); render(); });
+$('#unvisited').onclick = e => { unvisitedOnly = !unvisitedOnly; e.target.classList.toggle('on', unvisitedOnly); render(); };
+$('#moto').onchange = e => { motoF = e.target.value; render(); };
+$('#firechip').classList.toggle('on', fireOn);
+$('#firechip').onclick = e => { fireOn = !fireOn; e.target.classList.toggle('on', fireOn); if (fireOn) fireLayer.addTo(map); else map.removeLayer(fireLayer); store.set('fire', fireOn ? '1' : '0'); };
+$('#q').oninput = e => { q = e.target.value.trim(); render(); };
+$('#reload').onclick = () => load(true).then(r => r === 'ok' && toast('更新しました'));
+$('#s_close').onclick = () => { flushFlags(); cancelPick(); $('#sheet').classList.remove('open'); curSite = null; };
+// PCの詳細パネルはヘッダーの下から出す（ヘッダーの検索・＋物件・更新・👤 を隠さない）
+const setHH = () => document.documentElement.style.setProperty('--hh', $('header').offsetHeight + 'px');
+window.addEventListener('resize', setHH); setHH();
+
+// ===== ログイン =====
+(async function init() {
+  const pw = store.get('pw'), user = store.get('user');
+  // 記録者一覧は初回だけサーバから取る必要があるので、まずパスワードだけで試す
+  if (pw && user) {
+    $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; setHH();
+    const r = await load(false);
+    // パスワードが違うときだけログイン画面。圏外などで通信できないときは前回のデータのまま使う
+    if (r === 'auth') showLogin(); else locate();
+  } else showLogin();
+})();
+// 記録者の名前は設定シートにあり、ログイン画面を開いたときにパスワードなしで取る
+async function fetchUsers() {
+  try {
+    const j = await rpc('users', {});
+    if (j.ok && j.users) { store.set('users', j.users.join(',')); fillUsers(j.users); }
+  } catch (e) {}
+}
+function fillUsers(list) {
+  const sel = $('#l_user'), prev = sel.value; sel.innerHTML = '';
+  if (list && list.length) { sel.add(new Option('選んでください', '')); list.forEach(u => sel.add(new Option(u))); }
+  else sel.innerHTML = '<option value="">（読み込み中…）</option>';
+  const keep = prev || store.get('user');
+  if (keep && list && list.includes(keep)) sel.value = keep;
+}
+function showLogin() {
+  pending = null; // 前に確かめた結果（古いデータ）を使い回さない
+  $('#l_user').disabled = false;
+  $('#login').style.display = 'flex';
+  const cached = store.get('users'); fillUsers(cached ? cached.split(',') : null);
+  if (store.get('pw')) $('#l_pw').value = store.get('pw');
+  fetchUsers();
+}
+var pending = null; // パスワード確認の結果（{pw, j}）。init より前に使うので var（let だと宣言前に触れてエラー）
+async function checkPw() {
+  const pw = $('#l_pw').value; if (!pw) return null;
+  if (pending && pending.pw === pw) return pending.j;
+  $('#l_msg').textContent = '';
+  const j = await rpc('load', { p_pw: pw });
+  if (!j.ok) { $('#l_msg').textContent = j.error; return null; }
+  pending = { pw, j };
+  if (j.role === 'worker') { fillUsers([j.me]); $('#l_user').value = j.me; $('#l_user').disabled = true; } // 個人のパスワードなら記録者は本人に決まる
+  else { $('#l_user').disabled = false; store.set('users', j.users.join(',')); fillUsers(j.users); }
+  return j;
+}
+$('#l_pw').onchange = () => checkPw().catch(() => $('#l_msg').textContent = '通信エラー');
+$('#loginf').onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const j = await checkPw(); if (!j) return;
+    const user = j.role === 'worker' ? j.me : $('#l_user').value;
+    if (!user) { $('#l_msg').textContent = '記録者を選んでください'; return; }
+    store.set('pw', $('#l_pw').value); store.set('user', user); DATA = j; pending = null; saveCache();
+    $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; build(); setHH(); locate();
+  } catch (err) { $('#l_msg').textContent = '通信エラー'; }
+};
+$('#who').onclick = () => showLogin();
+
+// ===== ほかの人の変更をすぐ反映（Supabase のリアルタイム） =====
+// サーバーは「変わった」とだけ知らせてくる（中身は流れない）。受けたら少し待ってから読み直す
+let liveTimer = null;
+function liveReload() {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(async () => {
+    if (!store.get('pw') || $('#login').style.display === 'flex') return;
+    if (isEditing() || Object.keys(flagTimers).length) { liveReload(); return; } // 入力の途中・切り替えの送信待ちは後回し
+    await load(true);
+  }, 1500);
+}
+try {
+  const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false } });
+  sb.channel('genba-map').on('broadcast', { event: 'changed' }, liveReload).subscribe(st => console.log('realtime', st));
+} catch (e) { console.warn('リアルタイム更新を使えません', e); }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && DATA) liveReload(); });
+</script>
+</body>
+</html>
