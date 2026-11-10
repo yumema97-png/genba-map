@@ -39,7 +39,7 @@ const AMOUNT_SHEET = '金額';
 const AMOUNT_COLS = ['現場名', '金額（千円）', '取込日時'];
 const MANUAL_COLS = ['現場名', '元請', '職人', '消検月', '注意点', '住所', '緯度', '経度', '登録日時', '登録者', '更新日時', '更新者'];
 const PHOTO_FOLDER = '現場写真';
-// 図面PDF：ドライブ「仕事用/現場マップ/図面/<現場名>/」に置く。共有設定は変えない（アプリのパスワードを通してだけ開ける）
+// 図面PDF：ドライブ「仕事用/現場マップ/図面/<現場名>/」に置く。「リンクを知っている人は閲覧可」（2026-11-10〜。リンクはアプリの中でだけ出す）
 // 消防検査から30日たったら自動でゴミ箱へ（ゴミ箱でさらに30日は戻せる）
 const DRAW_SHEET = '図面';
 const DRAW_COLS = ['現場名', 'ファイル名', 'ファイルID', 'サイズKB', '登録日時', '登録者'];
@@ -561,6 +561,8 @@ function saveDrawingFile_(b) {
   if (bytes.length > 30 * 1024 * 1024) throw new Error('30MBまでです');
   const folder = subFolder_(subFolder_(appFolder_(), '図面'), clean(b.site).replace(/[\\/:*?"<>|]/g, '_'));
   const file = folder.createFile(Utilities.newBlob(bytes, 'application/pdf', name));
+  // 2026-11-10 Yoko 決定：図面も写真と同じく「リンクを知っている人は閲覧可」にして、ドライブのビューアで直接開く（GASを通すと10秒前後かかるため）
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   return { id: file.getId(), name, kb: Math.round(bytes.length / 1024) };
 }
 function addDrawingRow_(b) {
@@ -589,6 +591,18 @@ function deleteDrawing(b) {
   }
   return { ok: false, error: '図面が見つかりません' };
 }
+// 一覧にある図面を全部「リンクを知っている人は閲覧可」にする（切り替え前に入れた図面用。何度実行してもよい）
+function shareDrawings() {
+  const v = drawSheet_().getDataRange().getValues(); let n = 0;
+  for (let i = 1; i < v.length; i++) {
+    try {
+      const f = DriveApp.getFileById(v[i][2]);
+      if (f.getSharingAccess() !== DriveApp.Access.ANYONE_WITH_LINK) { f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); n++; }
+    } catch (e) {}
+  }
+  return n;
+}
+
 // 消防検査から DRAW_KEEP_DAYS 日たった図面をゴミ箱へ。消検日（物件追加）、なければ消検月の月末で数える。
 // 毎朝の importIfChanged から呼ぶ
 function cleanupDrawings_() {

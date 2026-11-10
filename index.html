@@ -576,15 +576,9 @@ async function uploadDrawings(s, files) {
   }
   toast(`図面を${ok}件保存しました`); await load(true);
 }
-async function openDrawing(id, label) {
-  const w = window.open('', '_blank'); // 先に窓を開く（待ってから開くとブロックされる）
-  if (w) w.document.write(`<p style="font-family:sans-serif">${esc(label)} を読み込み中…</p>`);
-  try {
-    const j = await post({ action: 'getDrawing', id });
-    const bin = atob(j.data), buf = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-    const url = URL.createObjectURL(new Blob([buf], { type: 'application/pdf' }));
-    if (w) w.location.href = url; else location.href = url;
-  } catch (e) { if (w) w.close(); toast('開けませんでした：' + e.message); }
+// 図面はドライブのビューアで直接開く（2026-11-10〜。図面は「リンクを知っている人は閲覧可」。GASを通すと10秒前後かかったため）
+function openDrawing(id) {
+  window.open(`https://drive.google.com/file/d/${encodeURIComponent(id)}/preview`, '_blank', 'noopener');
 }
 async function delDrawing(id, name) {
   if (!confirm(`図面「${name}」を削除します。\nドライブのゴミ箱へ移します（30日以内なら戻せます）。\nよろしいですか？`)) return;
