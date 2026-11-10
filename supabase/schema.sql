@@ -387,7 +387,7 @@ begin
   perform pg_advisory_xact_lock(4711);
   -- 読み込みの間に「位置を直す」で変わった座標は、そちらを使う
   select coalesce(jsonb_object_agg("現場名", jsonb_build_object('住所', "住所", '緯度', "緯度", '経度', "経度")), '{}') into cur from sites where "緯度" is not null;
-  delete from sites;
+  delete from sites where true;
   insert into sites
   select _t(x, '現場名'), ord::int, _t(x, '元請'), _t(x, '職人'), _t(x, '消検月'),
     _t(x, '図面'), _t(x, 'ELV'), _t(x, '見積'), _t(x, '受注'), _t(x, '発注'), _t(x, '着工'), _t(x, '設置'), _t(x, '下検査'),
@@ -401,7 +401,7 @@ begin
                        and (_t(x, '_prevLat') = '' or (cur -> _t(x, '現場名') ->> '緯度')::float8 <> _num(x, '_prevLat'))) as moved
         from jsonb_array_elements(p_rows) with ordinality as t(x, ord)) z
   on conflict do nothing;
-  delete from amounts;
+  delete from amounts where true;
   insert into amounts select _t(x, '現場名'), nullif(_t(x, '金額（千円）'), '')::numeric, _now() from jsonb_array_elements(coalesce(p_amounts, '[]')) x
     on conflict do nothing;
   -- Excel側で変わった項目のアプリの記録を消す（Excelに無い物件＝アプリで追加した物件は残す）
@@ -445,8 +445,8 @@ begin
   if exists (select 1 from cfg) and not _gas_ok(p_token) then raise exception 'already initialized'; end if;
   if coalesce(d -> 'cfg' ->> 'gas_token', '') = '' then raise exception 'gas_token missing'; end if;
   perform pg_advisory_xact_lock(4711);
-  delete from cfg; delete from accounts; delete from sites; delete from manual; delete from edits;
-  delete from amounts; delete from extra; delete from visits; delete from drawings;
+  delete from cfg where true; delete from accounts where true; delete from sites where true; delete from manual where true; delete from edits where true;
+  delete from amounts where true; delete from extra where true; delete from visits where true; delete from drawings where true;
   insert into cfg select key, value from jsonb_each_text(d -> 'cfg');
   insert into accounts select _t(x, '名前'), _t(x, 'パスワード'), _t(x, '担当名'), _t(x, 'メモ')
     from jsonb_array_elements(d -> 'accounts') x where _t(x, '名前') <> '' on conflict do nothing;
