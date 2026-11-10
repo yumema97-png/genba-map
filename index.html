@@ -399,14 +399,15 @@ function render() {
   });
   renderList();
 }
-let sortKey = 'due', sortAsc = true;
+let sortKey = 'days', sortAsc = true; // 初期は残日順（近い順→消検済→未定→完成済）
 function renderList() {
   const order = ['赤', '黄', '青', '灰', '消検済', '未定', '完成済'];
   const pdfMark = s => s.drawings.length ? ` <span class="pdfmark" title="図面${s.drawings.length}件">📄${s.drawings.length}</span>` : '';
   const nameCell = s => (s.alias ? `<b>${esc(s.alias)}</b>${pdfMark(s)}<small class="sub">${esc(s['現場名'])}</small>` : `<b>${esc(s['現場名'])}</b>${pdfMark(s)}`);
   const dayTxt = s => s.days == null ? '' : s.days < 0 ? (s.cat === '消検済' ? '消検済' : '完成') : (s.phase === '建確' ? `建確まで${s.days}` : s.days);
   let items = DATA.sitesX.filter(s => visible(s));
-  const keyf = { due: s => [order.indexOf(s.cat), s.days ?? 9e9], name: s => s['現場名'], moto: s => [motoIdx(s['元請']), s.days ?? 9e9], last: s => s.visits[0]?.['日時'] || '', amount: s => [0, -(+s.amount || 0)] }[sortKey];
+  const dueNum = s => { const t = String(s.ex['消検日'] || s.due || '').replace(/\D/g, ''); return t ? Number(t.slice(0, 12).padEnd(12, '0')) : 9e15; }; // 消検の日時そのもの（未定は最後）
+  const keyf = { days: s => [order.indexOf(s.cat), s.days ?? 9e9], due: s => [0, dueNum(s)], name: s => s['現場名'], moto: s => [motoIdx(s['元請']), s.days ?? 9e9], last: s => s.visits[0]?.['日時'] || '', amount: s => [0, -(+s.amount || 0)] }[sortKey];
   items.sort((a, b) => { const x = keyf(a), y = keyf(b); const r = Array.isArray(x) ? (x[0] - y[0] || x[1] - y[1]) : String(x).localeCompare(String(y), 'ja'); return sortAsc ? r : -r; });
   const dueCell = s => s.due ? `<b>${s.dueExact ? s.due.slice(5).replace('-', '/') : s.due.slice(0, 7).replace('-', '/')}</b>${s.days != null ? (s.days < 0 ? dayTxt(s) : s.phase === '建確' ? `建確あと${s.days}日` : 'あと' + s.days + '日') : ''}` : '未定';
   const cards = items.map(s => `<div class="item" data-s="${esc(s['現場名'])}"><i class="dot" style="background:${COL[s.cat]}"></i><div>${nameCell(s)}<small>${esc(s['元請'])}${s.visits.length ? ' ／ 最終 ' + s.visits[0]['日時'].slice(5, 10).replace('-', '/') + ' ' + esc(s.visits[0]['建物進捗']) : ' ／ 未訪問'}</small></div><div class="ym">${dueCell(s)}${MEET && s.amount !== '' ? `<br>${yen(s.amount)}千円` : ''}</div></div>`).join('');
@@ -421,7 +422,7 @@ function renderList() {
     (MEET ? `<div class="sumline"><b>会議用</b>　${new Date().toLocaleDateString('ja-JP')} 現在　${motoF ? esc(motoF) : '全元請'}　${items.length}件　合計 <b>${yen(shown)}</b> 千円<span class="pnote">（会議用は残り日数・未定・完成済に関係なく全件）</span></div>` : '');
   const imp = DATA.importedAt ? `<div class="impline">Excel取り込み：${esc(DATA.importedAt.slice(0, 16).replace('T', ' '))}${DATA.excelAt ? `（Excelの更新 ${esc(DATA.excelAt.slice(0, 16).replace('T', ' '))}）` : ''}　火・土の夜に複製し、翌朝取り込みます</div>` : '';
   $('#listpage').innerHTML = motobar + imp + (MEET ? monthTable() : '') + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
-    `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}<th>残日</th><th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th>${MEET ? th('amount', '金額（千円）') : ''}</tr></thead><tbody>${rows}</tbody></table>`;
+    `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}${th('days', '残日')}<th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th>${MEET ? th('amount', '金額（千円）') : ''}</tr></thead><tbody>${rows}</tbody></table>`;
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
   $('#listpage').querySelectorAll('.motobar button[data-m]').forEach(el => el.onclick = () => { motoF = el.dataset.m; $('#moto').value = motoF; render(); });
   if ($('#printbtn')) $('#printbtn').onclick = () => window.print();
