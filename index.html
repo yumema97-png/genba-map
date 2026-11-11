@@ -523,7 +523,8 @@ function openSite(name) {
   bindDrawings(s);
   $('#x_edit').onclick = () => openForm('edit', s); // Excelの物件も編集できる（アプリの値はExcelでその欄が変わるまで優先）
   if (s['手入力']) $('#x_del').onclick = () => delSite(s);
-  $('#s_body').querySelectorAll('button.del').forEach(b => b.onclick = () => delVisit(s, s.visits[+b.dataset.i]));
+  // 訪問履歴の削除ボタンだけ（図面の削除ボタンも class="del" なので、.hist で絞らないと図面の削除が効かなくなる）
+  $('#s_body').querySelectorAll('.hist button.del').forEach(b => b.onclick = () => delVisit(s, s.visits[+b.dataset.i]));
   $('#e_save').onclick = () => saveExtra(s);
   $('#s_body').querySelectorAll('button.clr').forEach(b => b.onclick = () => { $('#' + b.dataset.c).value = ''; $('#' + b.dataset.c + 'T').value = ''; });
 }
