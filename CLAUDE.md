@@ -10,8 +10,11 @@
 - `README.md` … セットアップ手順（スプレッドシート → GAS → Vercel → トリガー）
 - スプレッドシート「現場マップDB」は Yoko の Google ドライブ（yumema97）に作成済み。物件シートに165件入り（座標付き117件、完成済み48件は座標なし）
 
-## Supabase 版へ移行中（2026-11-10〜）
-いまの本番（`index.html`）は GAS 版のまま。Supabase 版は `sb/index.html`（https://yashima-genba.vercel.app/sb/ ）で試験中。並行期間のあと `sb/index.html` を `index.html` に置き換えて切り替える。
+## Supabase 版（2026-11-11 本番切り替え済み）
+**2026-11-11 14:11 に本番を Supabase 版に切り替えた。** `index.html` が Supabase 版。`sb/index.html` は本番へ転送するだけ。
+GAS は版16で `SB_ONLY = true`：旧版の doGet / doPost（シートの読み書き）は「新しい版に切り替えました」を返して止まる。写真・図面の保存（sbPhotos / sbDrawing）と毎朝の取り込み（Supabase にだけ入れる）は動く。
+スプレッドシート「現場マップDB」は切り替え時点の控え（もう更新されない）。`migrateToSupabase` は SB_ONLY の間は動かない（Supabase を古いシートで上書きしないため）。
+以下は移行時の設計メモ（いまも有効）。
 - Supabase：Yoko の個人アカウント（無料プラン）のプロジェクト **genba-map**（東京・ref `twoyzxitmyusbqlkjzfi`）。もう1つ tenken-system（点検管理）がある。無料は動かせるプロジェクトが2つまで
 - `supabase/schema.sql` … 表・権限・関数の全部。直したらダッシュボードの SQL エディタで丸ごと流し直す（何度流してもよい作り）
   - 表は画面から直接読めない（新しい表の自動公開OFF＋RLS有効・ポリシーなし）。呼べるのは関数だけ：画面用 `users` `load` `act`、GAS用 `whoami` `gas_sites` `gas_import` `gas_files` `bootstrap`
@@ -21,7 +24,7 @@
   - 関数の名前に `_cfg` `_sites` `_amounts` は使えない（表の配列型の名前とぶつかる）。PL/pgSQL の IF の中で CASE を使うときは括弧で囲む。API から呼ぶ関数の DELETE は `where true` が要る（pg_safeupdate）
 - 写真・図面はこれまでどおりドライブ（GAS が保存）。画面 → GAS の `sbPhotos` / `sbDrawing`（GAS は Supabase の `whoami` で本人と担当物件を確かめる）→ 返ったIDを `act` で記録
 - GAS → Supabase はトークン `sbToken`（GAS が自分で作ってスクリプトのプロパティに置き、`bootstrap` で Supabase の cfg に登録。人は見ない）
-- `migrateToSupabase()`（GAS エディタから実行）… スプレッドシートを丸ごと Supabase へ。2回目以降は Supabase を全部消してから入れ直す。**切り替えの直前にもう一度流す**（並行期間に旧版で入れた分を移すため。新版で入れた分は消える）
+- `migrateToSupabase()` … スプレッドシートを丸ごと Supabase へ（11/10 と切り替え直前の 11/11 に実行済み。いまは SB_ONLY で止めてある）
 - 毎朝の `importIfChanged` … スプレッドシート版に加えて Supabase にも取り込む。`sbCleanup_` で消検30日後の図面と、どこからも使われていない写真・図面をゴミ箱へ（作って3日以内と、一度に30件を超えるときは触らない）
 - 止まらない仕組み：`.github/workflows/keepalive.yml` が毎日12:23に `users` を呼ぶ（返事が変なら失敗）。毎朝のGASでも触る。公開リポジトリは60日コミットがないと定期実行が止まるので、そのときは Actions から再開
 - 住所→位置は画面で国土地理院の住所検索（GAS 版は Google の Geocoder）。現場名→住所の推定 `nameToAddress` は GAS と画面に同じものがある（166件で一致を確認済み）
