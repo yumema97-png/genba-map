@@ -232,8 +232,12 @@ small.sub{display:block;font-size:11px;color:var(--muted);font-weight:400}
 <div id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 // ===== 設定 =====
+// データは Supabase（2026-11-10〜）。GAS は写真・図面のドライブ保存だけ
+const SB_URL = 'https://twoyzxitmyusbqlkjzfi.supabase.co';
+const SB_KEY = 'sb_publishable_kohm5Neuh80PKUETukktug_5YqJQ1Ii'; // 公開してよいキー（表は直接読めない。関数だけ呼べる）
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzlpBd0scg1cLx1h7VyowWb2DHEhXkbUFhFjTxanTUpHLuTQI4uZBvIP294g4VRuTORLA/exec';
 const BANDS = [[60, '赤'], [90, '黄'], [120, '青']]; // 残り日数 → 区分
 const STAGES = ['基礎', '躯体', '外装', 'ボード', '天井', '仕上げ', '完了'];
@@ -301,8 +305,7 @@ async function load(force) {
   const pw = store.get('pw');
   if (!force) { const c = store.get('cache'); if (c) { try { DATA = JSON.parse(c); build(); } catch (e) {} } }
   try {
-    const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}&t=${Date.now()}`);
-    const j = await r.json();
+    const j = await rpc('load', { p_pw: pw });
     if (!j.ok) { toast(j.error || '読み込み失敗'); return /パスワード/.test(j.error || '') ? 'auth' : 'net'; }
     // 取り込みの途中などで物件が0件で返ったら、今の表示とキャッシュを残す
     if (!(j.sites || []).length && DATA && (DATA.sites || []).length) { toast('物件が0件で返ってきました。少し待って「更新」を押してください'); return 'net'; }
@@ -524,10 +527,71 @@ function openSite(name) {
   $('#e_save').onclick = () => saveExtra(s);
   $('#s_body').querySelectorAll('button.clr').forEach(b => b.onclick = () => { $('#' + b.dataset.c).value = ''; $('#' + b.dataset.c + 'T').value = ''; });
 }
-async function post(body) {
-  body.pw = store.get('pw'); body.user = store.get('user');
+// Supabase の関数を呼ぶ
+async function rpc(fn, args) {
+  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { apikey: SB_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message || `通信エラー（${r.status}）`);
+  return j;
+}
+// GAS（写真・図面のドライブ保存）
+async function gas(body) {
+  body.pw = store.get('pw');
   const r = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) });
   const j = await r.json(); if (!j.ok) throw new Error(j.error || '失敗'); return j;
+}
+// 書き込み。action と中身は GAS 版と同じ（Supabase の act 関数が受ける）
+async function post(body) {
+  const { action, ...b } = body;
+  if (action === 'visit' && (b.photos || []).filter(Boolean).length) {
+    // 写真は先にドライブへ（GAS）。返ってきたIDを記録に付ける
+    b.photoIds = (await gas({ action: 'sbPhotos', site: b.site, photos: b.photos.filter(Boolean) })).ids;
+  }
+  delete b.photos;
+  if (action === 'addDrawing') {
+    const f = (await gas({ action: 'sbDrawing', site: b.site, name: b.name, data: b.data })).file;
+    b.id = f.id; b.name = f.name; b.kb = f.kb; delete b.data;
+  }
+  if ((action === 'addSite' || action === 'setLocation') && b.lat == null) {
+    // 住所から位置を出す（国土地理院の住所検索）。住所が空なら現場名から推定
+    if (action === 'addSite' && !b.addr) b.addr = nameToAddress(norm(b.name));
+    const g = b.addr ? await geocodeAddr(b.addr) : null;
+    if (g) { b.lat = g.lat; b.lng = g.lng; }
+  }
+  if (action === 'addSite') b.name = norm(b.name);
+  const j = await rpc('act', { p_pw: store.get('pw'), p_user: store.get('user') || '', p_action: action, p_body: b });
+  if (!j.ok) throw new Error(j.error || '失敗');
+  return j;
+}
+async function geocodeAddr(addr) {
+  try {
+    const a = await (await fetch('https://msearch.gsi.go.jp/address-search/AddressSearch?q=' + encodeURIComponent(addr))).json();
+    if (a && a.length) return { lat: a[0].geometry.coordinates[1], lng: a[0].geometry.coordinates[0] };
+  } catch (e) {}
+  return null;
+}
+// 全角英数→半角、全角スペース→半角（GAS版の norm と同じ）
+function norm(s) { return String(s ?? '').replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/　/g, ' ').trim(); }
+// 現場名 → 住所（GAS版の nameToAddress と同じ。札幌の条丁目表記を読む。読めなければ ''）
+const KU = { '美園': '豊平区', '平岸': '豊平区', '月寒西': '豊平区', '月寒東': '豊平区', '中の島': '豊平区', '西岡': '豊平区', '福住': '豊平区', '豊平': '豊平区',
+  '東札幌': '白石区', '菊水': '白石区', '発寒': '西区', '二十四軒': '西区', '西野': '西区', '新琴似': '北区', '澄川': '南区', '宮の森': '中央区',
+  '厚別中央': '厚別区', '宮の沢': '手稲区', '手稲本町': '手稲区', '本町': '東区' };
+function nameToAddress(name) {
+  let n = norm(name), m;
+  if (/^(千歳市|恵庭市|北広島市|江別市)/.test(n)) return '北海道' + n.replace(/(MS|マンション|賃貸MS|の集合住宅|ホテル|PROJECT|計画).*$/, '').replace(/\s*[A-D]棟$/, '');
+  n = n.replace(/^(GA-|PS-|LE-|NUTS-|CORE-|CORE )/, '');
+  n = n.replace(/(MS|BL)?\s*(②|ⅲ|Ⅲ|\(A棟\)|\(B棟\)|[A-D]棟|東棟|西棟|賃貸MS|賃貸|の集合住宅|マンション|HOTEL|ホテル|学生寮|民泊|MS).*$/, '').trim();
+  const kuFor = (ns, j, ew) => ns === '南' ? '中央区' : ew === '東' ? (j >= 6 ? '東区' : '中央区') : (j >= 10 ? '北区' : '中央区');
+  if ((m = /^([SN])(\d+)([EW])(\d+)/.exec(n))) { const ns = m[1] === 'S' ? '南' : '北', ew = m[3] === 'E' ? '東' : '西'; return `北海道札幌市${kuFor(ns, +m[2], ew)}${ns}${m[2]}条${ew}${m[4]}丁目`; }
+  if ((m = /^([南北])\s*(\d+)\s*条?\s*([東西])\s*(\d+)/.exec(n))) return `北海道札幌市${kuFor(m[1], +m[2], m[3])}${m[1]}${m[2]}条${m[3]}${m[4]}丁目`;
+  if ((m = /^(麻生町?)\s*(\d+)/.exec(n))) return `北海道札幌市北区麻生町${m[2]}丁目`;
+  if ((m = /^(本通|本郷通|南郷通)り?\s*(\d+)丁目?\s*([南北])?/.exec(n))) return `北海道札幌市白石区${m[1]}${m[2]}丁目${m[3] || ''}`;
+  if ((m = /^(栄通|西町北|厚別南|青葉町)\s*(\d+)/.exec(n))) return `北海道札幌市${{ '栄通': '白石区', '西町北': '西区', '厚別南': '厚別区', '青葉町': '厚別区' }[m[1]]}${m[1]}${m[2]}丁目`;
+  if ((m = /^白石中央\s*(\d+)-(\d+)/.exec(n))) return `北海道札幌市白石区中央${m[1]}条${m[2]}丁目`;
+  if ((m = /^月寒中央通\s*(\d+)/.exec(n))) return `北海道札幌市豊平区月寒中央通${m[1]}丁目`;
+  if ((m = /^([一-龥ぁ-んァ-ンの]+?)\s*(\d+)\s*(?:-|条)\s*(\d+)/.exec(n))) return `北海道札幌市${KU[m[1]] || ''}${m[1]}${m[2]}条${m[3]}丁目`;
+  if (/^中央区/.test(n)) return '北海道札幌市' + n;
+  return '';
 }
 async function sendVisit(s) {
   const btn = $('#v_send'); const stage = $('#v_stage').value, memo = $('#v_memo').value.trim();
@@ -851,7 +915,7 @@ window.addEventListener('resize', setHH); setHH();
 // 記録者の名前は設定シートにあり、ログイン画面を開いたときにパスワードなしで取る
 async function fetchUsers() {
   try {
-    const j = await (await fetch(`${GAS_URL}?mode=users&t=${Date.now()}`)).json();
+    const j = await rpc('users', {});
     if (j.ok && j.users) { store.set('users', j.users.join(',')); fillUsers(j.users); }
   } catch (e) {}
 }
@@ -875,7 +939,7 @@ async function checkPw() {
   const pw = $('#l_pw').value; if (!pw) return null;
   if (pending && pending.pw === pw) return pending.j;
   $('#l_msg').textContent = '';
-  const r = await fetch(`${GAS_URL}?pw=${encodeURIComponent(pw)}&t=${Date.now()}`); const j = await r.json();
+  const j = await rpc('load', { p_pw: pw });
   if (!j.ok) { $('#l_msg').textContent = j.error; return null; }
   pending = { pw, j };
   if (j.role === 'worker') { fillUsers([j.me]); $('#l_user').value = j.me; $('#l_user').disabled = true; } // 個人のパスワードなら記録者は本人に決まる
@@ -894,6 +958,23 @@ $('#loginf').onsubmit = async e => {
   } catch (err) { $('#l_msg').textContent = '通信エラー'; }
 };
 $('#who').onclick = () => showLogin();
+
+// ===== ほかの人の変更をすぐ反映（Supabase のリアルタイム） =====
+// サーバーは「変わった」とだけ知らせてくる（中身は流れない）。受けたら少し待ってから読み直す
+let liveTimer = null;
+function liveReload() {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(async () => {
+    if (!store.get('pw') || $('#login').style.display === 'flex') return;
+    if (isEditing() || Object.keys(flagTimers).length) { liveReload(); return; } // 入力の途中・切り替えの送信待ちは後回し
+    await load(true);
+  }, 1500);
+}
+try {
+  const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false } });
+  sb.channel('genba-map').on('broadcast', { event: 'changed' }, liveReload).subscribe(st => console.log('realtime', st));
+} catch (e) { console.warn('リアルタイム更新を使えません', e); }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && DATA) liveReload(); });
 </script>
 </body>
 </html>

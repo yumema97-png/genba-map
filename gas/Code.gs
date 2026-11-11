@@ -185,8 +185,15 @@ function AMOUNT_SHEET_() {
 }
 
 // ---------- Web API ----------
+// 2026-11-11 Supabase 版に切り替えた。true の間は、スプレッドシート版の読み書きを止める
+// （古い画面を開きっぱなしの人が書いても、シートにだけ入って見えなくなるのを防ぐ）。
+// 毎朝の取り込みも Supabase にだけ入れる。シートは2026-11-11時点の控えとして残る
+const SB_ONLY = true;
+const SWITCHED_MSG = '新しい版に切り替えました。ページを開き直してください（ホーム画面のアイコンからでも同じです）';
+
 function doGet(e) {
   const p = (e && e.parameter) || {};
+  if (SB_ONLY) return json({ ok: false, error: SWITCHED_MSG });
   // 記録者の名前だけはパスワードなしで返す（ログイン画面で最初から選べるように。2026-11-09 Yoko 了承）
   if (p.mode === 'users') return json({ ok: true, users: cfg('記録者').split(',').map(s => s.trim()).filter(Boolean) });
   const a = auth_(p.pw), role = a.role;
@@ -220,6 +227,7 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json({ ok: false, error: 'bad json' }); }
   // Supabase 版の画面からの写真・図面の保存（パスワードは Supabase に確かめる）
   if (body.action === 'sbPhotos' || body.action === 'sbDrawing') return json(sbUpload_(body));
+  if (SB_ONLY) return json({ ok: false, error: SWITCHED_MSG });
   const who = auth_(body.pw);
   if (!who.role) return json({ ok: false, error: 'パスワードが違います' });
   // 金額を書けるのは会議用で入ったときだけ（普段用には金額を見せていないので、書かせもしない）
@@ -678,7 +686,7 @@ function json(obj) {
 // 毎朝トリガーで呼ぶ。ドライブのExcelが前回取り込み後に更新されていたときだけ取り込む。
 // Excelはパソコンのタスク「現場マップExcel複製」が火曜・土曜の夜にサーバーから複製している。
 function importIfChanged() {
-  try { cleanupDrawings_(); } catch (e) { console.error('図面の整理に失敗: ' + e.message); } // 古い図面の整理（毎朝）
+  if (!SB_ONLY) { try { cleanupDrawings_(); } catch (e) { console.error('図面の整理に失敗: ' + e.message); } } // 古い図面の整理（毎朝。切り替え後は Supabase 側の sbCleanup_ だけ）
   try { sbCleanup_(); } catch (e) { console.error('Supabase の図面・写真の整理に失敗: ' + e.message); }
   const xlsx = excelFile_();
   const updated = xlsx.getLastUpdated().getTime();
@@ -737,7 +745,7 @@ function importFromExcel(file) {
     DriveApp.getFileById(tmp.id).setTrashed(true);
   }
   if (rows.length === 0) throw new Error('物件行が0件でした');
-  writeImport_(rows, amts, now, xlsx, old);
+  if (!SB_ONLY) writeImport_(rows, amts, now, xlsx, old);
   if (sb) {
     try { sbPushImport_(sb, now, xlsx); } catch (e) { console.error('Supabase への取り込みに失敗: ' + e.message); }
   }
@@ -910,6 +918,8 @@ function sbToken_() {
 // スプレッドシートの中身を丸ごと Supabase に入れる。エディタから手で実行する。
 // 1回目：Supabase が空のときだけ通る。2回目以降（切り替え直前の入れ直し）は Supabase の中身を全部消してから入れる
 function migrateToSupabase() {
+  // 切り替えた後に流すと、Supabase の最新の内容を古いシートで上書きしてしまう
+  if (SB_ONLY) throw new Error('切り替え済み（SB_ONLY）。シートは古いので Supabase へは流さない');
   const props = PropertiesService.getScriptProperties();
   manualSheet(); flagSheet(); accountSheet_(); AMOUNT_SHEET_(); drawSheet_();
   const dump = {
@@ -965,8 +975,10 @@ function sbPushImport_(sb, now, xlsx) {
 function sbCleanup_() {
   const r = sbRpc_('gas_files', { p_token: sbToken_() });
   const keep = new Set(r.keep || []);
-  readSheet(SHEETS.visits).forEach(v => String(v['写真'] || '').split('\n').filter(Boolean).forEach(id => keep.add(id)));
-  drawSheet_(); readSheet(DRAW_SHEET).forEach(d => keep.add(String(d['ファイルID'])));
+  if (!SB_ONLY) { // 併用の間はスプレッドシート版で使っているファイルも残す
+    readSheet(SHEETS.visits).forEach(v => String(v['写真'] || '').split('\n').filter(Boolean).forEach(id => keep.add(id)));
+    drawSheet_(); readSheet(DRAW_SHEET).forEach(d => keep.add(String(d['ファイルID'])));
+  }
   (r.trash || []).forEach(id => { if (!keep.has(id)) { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) {} } });
   if (keep.size === 0) return;
   const limit = new Date(Date.now() - 3 * 86400000), orphans = [];
