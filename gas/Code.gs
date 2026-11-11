@@ -684,7 +684,7 @@ function json(obj) {
 
 // ---------- Excel 取り込み ----------
 // 毎朝トリガーで呼ぶ。ドライブのExcelが前回取り込み後に更新されていたときだけ取り込む。
-// Excelはパソコンのタスク「現場マップExcel複製」が火曜・土曜の夜にサーバーから複製している。
+// Excelはパソコンのタスク「現場マップExcel複製」が毎晩23:30にサーバーから複製している（2026-11-11〜。前は火・土）。
 function importIfChanged() {
   if (!SB_ONLY) { try { cleanupDrawings_(); } catch (e) { console.error('図面の整理に失敗: ' + e.message); } } // 古い図面の整理（毎朝。切り替え後は Supabase 側の sbCleanup_ だけ）
   try { sbCleanup_(); } catch (e) { console.error('Supabase の図面・写真の整理に失敗: ' + e.message); }

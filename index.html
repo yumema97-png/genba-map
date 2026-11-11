@@ -364,7 +364,7 @@ function build() {
   const wsel = $('#worker'); wsel.innerHTML = '<option value="">職人：全員</option>' + ws.map(w => `<option>${esc(w)}</option>`).join(''); wsel.value = workerF;
   const fmtShort = v => v ? `${+v.slice(5, 7)}/${+v.slice(8, 10)} ${v.slice(11, 16)}` : '';
   $('#impinfo').textContent = DATA.importedAt ? `Excel取込 ${fmtShort(DATA.importedAt)}` : '';
-  $('#impinfo').title = DATA.excelAt ? `取り込んだExcelの更新日時：${fmtShort(DATA.excelAt)}（火・土の夜にサーバーから複製、翌朝取り込み）` : '';
+  $('#impinfo').title = DATA.excelAt ? `取り込んだExcelの更新日時：${fmtShort(DATA.excelAt)}（毎晩サーバーから複製、翌朝取り込み）` : '';
   document.querySelectorAll('.chip[data-c]').forEach(ch => ch.querySelector('b').textContent = DATA.sitesX.filter(s => s.cat === ch.dataset.c).length);
   render();
   if (curSite && !isEditing()) openSite(curSite);
@@ -423,7 +423,7 @@ function renderList() {
   const shown = items.reduce((a, s) => a + (+s.amount || 0), 0);
   const motobar = `<div class="motobar"><button data-m="" class="${motoF ? '' : 'on'}">全部 ${motoAll}${sumTxt(sumAll)}</button>${Object.keys(motoCount).sort((a, b) => motoIdx(a) - motoIdx(b)).map(m => `<button data-m="${esc(m)}" class="${motoF === m ? 'on' : ''}">${esc(m)} ${motoCount[m]}${sumTxt(motoSum[m])}</button>`).join('')}${MEET ? '<button id="printbtn" class="print">印刷</button>' : ''}</div>` +
     (MEET ? `<div class="sumline"><b>会議用</b>　${new Date().toLocaleDateString('ja-JP')} 現在　${motoF ? esc(motoF) : '全元請'}　${items.length}件　合計 <b>${yen(shown)}</b> 千円<span class="pnote">（会議用は残り日数・未定・完成済に関係なく全件）</span></div>` : '');
-  const imp = DATA.importedAt ? `<div class="impline">Excel取り込み：${esc(DATA.importedAt.slice(0, 16).replace('T', ' '))}${DATA.excelAt ? `（Excelの更新 ${esc(DATA.excelAt.slice(0, 16).replace('T', ' '))}）` : ''}　火・土の夜に複製し、翌朝取り込みます</div>` : '';
+  const imp = DATA.importedAt ? `<div class="impline">Excel取り込み：${esc(DATA.importedAt.slice(0, 16).replace('T', ' '))}${DATA.excelAt ? `（Excelの更新 ${esc(DATA.excelAt.slice(0, 16).replace('T', ' '))}）` : ''}　毎晩複製し、翌朝取り込みます</div>` : '';
   $('#listpage').innerHTML = motobar + imp + (MEET ? monthTable() : '') + (cards || '<div style="padding:14px;color:var(--muted)">該当なし</div>') +
     `<table class="lt"><thead><tr><th></th>${th('name', '現場名')}${th('moto', '元請')}<th>職人</th>${th('due', '消検')}${th('days', '残日')}<th>建築確認</th><th>進み</th>${th('last', '最終訪問')}<th>工事進捗メモ</th><th>注意点</th>${MEET ? th('amount', '金額（千円）') : ''}</tr></thead><tbody>${rows}</tbody></table>`;
   $('#listpage').querySelectorAll('[data-s]').forEach(el => el.onclick = () => openSite(el.dataset.s));
