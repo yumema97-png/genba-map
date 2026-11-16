@@ -13,6 +13,11 @@ create table if not exists cfg (k text primary key, v text not null default '');
 create table if not exists accounts (
   "名前" text primary key, "パスワード" text not null default '', "担当名" text not null default '', "メモ" text not null default ''
 );
+-- 2026-11-16〜 全員が個人のパスワードで入る。種別：admin＝管理用（金額・アカウント管理。画面の role は meeting）、
+-- staff＝社内（role normal）、worker＝外注の職人（担当物件だけ・訪問記録だけ）。記録者はアカウントの名前
+alter table accounts add column if not exists "種別" text not null default 'worker';
+-- パスワードの間違いの記録（同じ所から15分に20回まちがえたら15分止める）
+create table if not exists auth_fail (at timestamptz not null default now(), ip text not null default '');
 
 -- Excel から取り込む物件（毎朝 GAS が入れ替える）。ord＝Excelの並び
 create table if not exists sites (
@@ -65,6 +70,7 @@ alter table amounts enable row level security;
 alter table extra enable row level security;
 alter table visits enable row level security;
 alter table drawings enable row level security;
+alter table auth_fail enable row level security;
 revoke all on all tables in schema public from anon, authenticated;
 revoke all on all sequences in schema public from anon, authenticated;
 
@@ -88,15 +94,31 @@ $$ select array['図面','ELV','見積','受注','発注','着工','設置','下
 create or replace function _edit_keys() returns text[] language sql immutable as
 $$ select array['元請','職人','消検月','注意点'] || _flag_keys() $$;
 
--- だれか（パスワードから）。role: meeting / normal / worker / ''
+-- だれか（パスワードから）。role: meeting（管理用）/ normal（社内）/ worker（外注）/ ''。name＝記録者の名前
 create or replace function _auth(p_pw text) returns jsonb language sql stable as $$
-  select case
-    when coalesce(p_pw, '') = '' then jsonb_build_object('role', '')
-    when cfgv('pw_meeting') <> '' and p_pw = cfgv('pw_meeting') then jsonb_build_object('role', 'meeting')
-    when cfgv('pw_normal') <> '' and p_pw = cfgv('pw_normal') then jsonb_build_object('role', 'normal')
-    else coalesce((select jsonb_build_object('role', 'worker', 'name', "名前", 'worker', coalesce(nullif("担当名", ''), "名前"))
-                   from accounts where "パスワード" <> '' and "パスワード" = p_pw limit 1), jsonb_build_object('role', ''))
-  end $$;
+  select coalesce((
+    select jsonb_build_object('role', case "種別" when 'admin' then 'meeting' when 'staff' then 'normal' else 'worker' end,
+                              'name', "名前", 'worker', coalesce(nullif("担当名", ''), "名前"))
+    from accounts where coalesce(p_pw, '') <> '' and "パスワード" = p_pw limit 1), jsonb_build_object('role', '')) $$;
+
+create or replace function _ip() returns text language sql stable as $$
+  select btrim(split_part(coalesce(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ''), ',', 1)) $$;
+
+-- パスワードを確かめる（間違いを数える）。同じ所から15分に20回まちがえたら15分は通さない
+create or replace function _auth_try(p_pw text) returns jsonb language plpgsql as $$
+declare a jsonb; v_ip text := _ip();
+begin
+  if (select count(*) from auth_fail f where f.ip = v_ip and f.at > now() - interval '15 minutes') >= 20 then
+    return jsonb_build_object('role', '', 'error', 'パスワードを何度も間違えたので止めています。15分ほど待ってからもう一度入れてください');
+  end if;
+  a := _auth(p_pw);
+  if a ->> 'role' = '' then
+    insert into auth_fail (ip) values (v_ip);
+    delete from auth_fail where at < now() - interval '1 day';
+    return a || jsonb_build_object('error', 'パスワードが違います');
+  end if;
+  return a;
+end $$;
 
 -- 物件一覧（Excel＋アプリ追加。アプリでの変更を重ねる。Excel側がその後変わった項目はExcelの値）
 create or replace function all_sites_j() returns table (j jsonb, o float8, n text) language sql stable as $$
@@ -132,33 +154,34 @@ create or replace function users() returns jsonb language sql stable security de
 $$;
 
 -- 全データ（GAS版の doGet と同じ形）
-create or replace function load(p_pw text) returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare a jsonb := _auth(p_pw); r text := a ->> 'role'; w text := a ->> 'worker'; mine text[];
+create or replace function load(p_pw text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare a jsonb := _auth_try(p_pw); r text := a ->> 'role'; w text := a ->> 'worker'; mine text[];
 begin
-  if r = '' then return jsonb_build_object('ok', false, 'error', 'パスワードが違います'); end if;
+  if r = '' then return jsonb_build_object('ok', false, 'error', a ->> 'error'); end if;
   if r = 'worker' then
     select coalesce(array_agg(n), '{}') into mine from all_sites_j() s where w = any(_split(s.j ->> '職人'));
   end if;
   return jsonb_build_object(
     'ok', true, 'role', r,
-    'me', case when r = 'worker' then a ->> 'name' end,
-    'staff', case when r <> 'worker' then (select coalesce(jsonb_agg(coalesce(nullif("担当名", ''), "名前") order by "名前"), '[]') from accounts) end,
+    'me', a ->> 'name',
+    'staff', case when r <> 'worker' then (select coalesce(jsonb_agg(coalesce(nullif("担当名", ''), "名前") order by "名前"), '[]') from accounts where "種別" = 'worker') end,
     'amounts', case when r = 'meeting' then amounts_j() end,
     'sites', (select coalesce(jsonb_agg(s.j order by s.o, s.n), '[]') from all_sites_j() s where r <> 'worker' or s.n = any(mine)),
     'extra', (select coalesce(jsonb_agg(to_jsonb(e)), '[]') from extra e where r <> 'worker' or e."現場名" = any(mine)),
     'visits', (select coalesce(jsonb_agg(to_jsonb(v) - 'id' order by v.id), '[]') from visits v where r <> 'worker' or v."現場名" = any(mine)),
     'drawings', (select coalesce(jsonb_agg(to_jsonb(d) order by d."登録日時"), '[]') from drawings d where r <> 'worker' or d."現場名" = any(mine)),
-    'users', case when r = 'worker' then jsonb_build_array(a ->> 'name') else to_jsonb(_split(replace(cfgv('users'), ' ', ''))) end,
+    'users', jsonb_build_array(a ->> 'name'),
     'radius', coalesce(nullif(cfgv('radius'), '')::int, 300),
     'updated', to_jsonb(_now()),
     'importedAt', cfgv('imported_at'), 'excelAt', cfgv('excel_at'));
 end $$;
 
 -- GAS が写真・図面を保存する前に「この人は保存してよいか」を聞く
-create or replace function whoami(p_pw text, p_site text) returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare a jsonb := _auth(p_pw); r text := a ->> 'role';
+drop function if exists whoami(text, text);
+create or replace function whoami(p_pw text, p_site text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare a jsonb := _auth_try(p_pw); r text := a ->> 'role';
 begin
-  if r = '' then return jsonb_build_object('ok', false, 'error', 'パスワードが違います'); end if;
+  if r = '' then return jsonb_build_object('ok', false, 'error', a ->> 'error'); end if;
   if r = 'worker' and not exists (select 1 from all_sites_j() s where s.n = p_site and (a ->> 'worker') = any(_split(s.j ->> '職人'))) then
     return jsonb_build_object('ok', false, 'error', '担当の物件ではありません');
   end if;
@@ -201,21 +224,20 @@ create or replace function _pw_problem(pw text, except_name text) returns text l
   select case
     when pw = '' then ''
     when length(pw) < 6 then 'パスワードは6文字以上にしてください'
-    when pw = cfgv('pw_normal') or pw = cfgv('pw_meeting') then '普段用・会議用と同じパスワードは使えません'
-    when exists (select 1 from accounts where "パスワード" = pw and "名前" <> coalesce(except_name, '')) then 'ほかの職人と同じパスワードです'
+    when exists (select 1 from accounts where "パスワード" = pw and "名前" <> coalesce(except_name, '')) then 'ほかの人と同じパスワードです'
     else '' end $$;
 
 -- 書き込み（GAS版の doPost と同じ action 名・同じ中身）
 create or replace function act(p_pw text, p_user text, p_action text, p_body jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
 declare
-  a jsonb := _auth(p_pw); r text := a ->> 'role'; b jsonb := coalesce(p_body, '{}'); u text := btrim(coalesce(p_user, ''));
-  site text := _t(b, 'site'); k text; v text; e text; f jsonb; in_excel boolean; is_manual boolean; n int; nm text; addr text;
+  a jsonb := _auth_try(p_pw); r text := a ->> 'role'; b jsonb := coalesce(p_body, '{}'); u text := coalesce(a ->> 'name', ''); -- 記録者はアカウントの名前（p_user は使わない）
+  site text := _t(b, 'site'); k text; v text; e text; f jsonb; in_excel boolean; is_manual boolean; n int; nm text; addr text; kind text;
 begin
-  if r = '' then return jsonb_build_object('ok', false, 'error', 'パスワードが違います'); end if;
+  if r = '' then return jsonb_build_object('ok', false, 'error', a ->> 'error'); end if;
   -- 金額を書けるのは会議用だけ
   if r <> 'meeting' and b ? 'fields' then b := jsonb_set(b, '{fields}', (b -> 'fields') - '金額'); end if;
   if p_action in ('listAccounts', 'saveAccount', 'deleteAccount', 'setSharedPw') and r <> 'meeting' then
-    return jsonb_build_object('ok', false, 'error', '会議用パスワードで入ったときだけ使えます');
+    return jsonb_build_object('ok', false, 'error', '管理用のアカウントで入ったときだけ使えます');
   end if;
   if r = 'worker' then
     if p_action not in ('visit', 'deleteVisit') then return jsonb_build_object('ok', false, 'error', 'この操作はできません（業務部に頼んでください）'); end if;
@@ -229,8 +251,8 @@ begin
 
   if p_action = 'listAccounts' then
     return jsonb_build_object('ok', true,
-      'accounts', (select coalesce(jsonb_agg(jsonb_build_object('name', "名前", 'pw', "パスワード", 'worker', "担当名") order by "名前"), '[]') from accounts),
-      'normalPw', cfgv('pw_normal'), 'meetingPw', cfgv('pw_meeting'));
+      'accounts', (select coalesce(jsonb_agg(jsonb_build_object('name', "名前", 'pw', "パスワード", 'worker', "担当名", 'kind', "種別")
+                   order by case "種別" when 'admin' then 0 when 'staff' then 1 else 2 end, "名前"), '[]') from accounts));
 
   elsif p_action = 'visit' then
     insert into visits ("日時", "記録者", "現場名", "建物進捗", "メモ", "写真", "緯度", "経度", "距離m")
@@ -327,29 +349,37 @@ begin
     return jsonb_build_object('ok', true);
 
   elsif p_action = 'saveAccount' then
-    nm := _t(b, 'name');
+    nm := _t(b, 'name'); kind := coalesce(nullif(_t(b, 'kind'), ''), 'worker');
     if nm = '' then return jsonb_build_object('ok', false, 'error', '名前を入れてください'); end if;
+    if kind not in ('admin', 'staff', 'worker') then return jsonb_build_object('ok', false, 'error', '種別が不正です'); end if;
+    if kind <> 'worker' and _t(b, 'newPw') = '' then return jsonb_build_object('ok', false, 'error', 'パスワードを入れてください'); end if;
+    if kind <> 'admin' and not exists (select 1 from accounts where "種別" = 'admin' and "名前" <> coalesce(nullif(_t(b, 'oldName'), ''), nm)) then
+      return jsonb_build_object('ok', false, 'error', '管理用のアカウントが1つもなくなるので変えられません');
+    end if;
+    if kind = 'admin' and _t(b, 'newPw') = '' then return jsonb_build_object('ok', false, 'error', 'パスワードを入れてください'); end if;
     e := _pw_problem(_t(b, 'newPw'), coalesce(nullif(_t(b, 'oldName'), ''), nm));
     if e <> '' then return jsonb_build_object('ok', false, 'error', e); end if;
     if exists (select 1 from accounts where "名前" = nm and "名前" <> coalesce(nullif(_t(b, 'oldName'), ''), nm)) then
-      return jsonb_build_object('ok', false, 'error', '同じ名前の職人がいます');
+      return jsonb_build_object('ok', false, 'error', '同じ名前の人がいます');
     end if;
     if (b ->> 'isNew')::boolean is true and exists (select 1 from accounts where "名前" = nm) then
-      return jsonb_build_object('ok', false, 'error', '同じ名前の職人がいます（変えるときは一覧の「保存」で）');
+      return jsonb_build_object('ok', false, 'error', '同じ名前の人がいます（変えるときは一覧の「保存」で）');
     end if;
-    update accounts set "名前" = nm, "パスワード" = _t(b, 'newPw'), "担当名" = coalesce(nullif(_t(b, 'worker'), ''), nm)
+    update accounts set "名前" = nm, "パスワード" = _t(b, 'newPw'), "担当名" = case when kind = 'worker' then coalesce(nullif(_t(b, 'worker'), ''), nm) else '' end, "種別" = kind
       where "名前" = coalesce(nullif(_t(b, 'oldName'), ''), nm);
     get diagnostics n = row_count;
-    if n = 0 then insert into accounts values (nm, _t(b, 'newPw'), coalesce(nullif(_t(b, 'worker'), ''), nm), _t(b, 'memo')); end if;
+    if n = 0 then insert into accounts values (nm, _t(b, 'newPw'), case when kind = 'worker' then coalesce(nullif(_t(b, 'worker'), ''), nm) else '' end, _t(b, 'memo'), kind); end if;
     return jsonb_build_object('ok', true);
 
   elsif p_action = 'deleteAccount' then
+    if _t(b, 'name') = (a ->> 'name') then return jsonb_build_object('ok', false, 'error', 'いま入っているアカウントは削除できません'); end if;
     delete from accounts where "名前" = _t(b, 'name');
     get diagnostics n = row_count;
     if n = 0 then return jsonb_build_object('ok', false, 'error', '見つかりません'); end if;
     return jsonb_build_object('ok', true);
 
   elsif p_action = 'setSharedPw' then
+    return jsonb_build_object('ok', false, 'error', '共通のパスワードはなくなりました（各自のパスワードは一覧で変えます）');
     v := _t(b, 'newPw');
     if length(v) < 6 then return jsonb_build_object('ok', false, 'error', 'パスワードは6文字以上にしてください'); end if;
     if (v = (case when _t(b, 'kind') = 'meeting' then cfgv('pw_normal') else cfgv('pw_meeting') end)
@@ -503,3 +533,13 @@ grant execute on function gas_files(text) to anon;
 drop function if exists bootstrap(jsonb);
 grant execute on function bootstrap(jsonb, text) to anon;
 alter default privileges in schema public revoke execute on functions from public, anon, authenticated;
+
+-- ---------- 2026-11-16 移行：共通パスワード → 個人のパスワード（何度流してもよい） ----------
+-- 会議用パスワードをそのまま管理用アカウント「業務部」に移し、共通の2つは消す（値はここに書かない）
+do $$ begin
+  if not exists (select 1 from accounts where "種別" = 'admin') and cfgv('pw_meeting') <> '' then
+    insert into accounts ("名前", "パスワード", "担当名", "メモ", "種別") values ('業務部', cfgv('pw_meeting'), '', '管理用（業務部・会議用）', 'admin')
+    on conflict ("名前") do update set "パスワード" = excluded."パスワード", "種別" = 'admin', "担当名" = '';
+  end if;
+  if exists (select 1 from accounts where "種別" = 'admin') then delete from cfg where k in ('pw_normal', 'pw_meeting'); end if;
+end $$;
