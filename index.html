@@ -55,7 +55,7 @@ header select{border:0;border-radius:6px;padding:4px 6px;font-size:12px;max-widt
 .motobar button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12px;cursor:pointer}
 .motobar button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
 body.meet header .chip[data-c],body.meet #unvisited{display:none}
-#admin{display:none}body.meet #admin{display:inline-flex}
+#admin,#meetchip{display:none}body.admin #admin,body.admin #meetchip{display:inline-flex}
 .adm{width:100%;border-collapse:collapse;font-size:13px}.adm th,.adm td{border-bottom:1px solid var(--line);padding:6px 4px;text-align:left}
 .adm input{border:1px solid var(--line);border-radius:6px;padding:5px 7px;width:100%;font-family:ui-monospace,Consolas,monospace}
 .adm td.b{white-space:nowrap;text-align:right}
@@ -195,8 +195,7 @@ small.sub{display:block;font-size:11px;color:var(--muted);font-weight:400}
 <div id="login"><form id="loginf">
   <h2>現場マップ</h2>
   <label>パスワード<input id="l_pw" class="f" type="password" autocomplete="current-password"></label>
-  <label>記録者<select id="l_user" class="f"></select></label>
-  <div style="font-size:11px;color:var(--muted)">個人のパスワードを持っている人は、記録者は自動で決まります</div>
+  <div style="font-size:11px;color:var(--muted)">自分のパスワードを入れてください。記録はそのパスワードの人の名前で残ります</div>
   <button class="btn" type="submit">開く</button>
   <div id="l_msg" style="color:var(--red);font-size:12px"></div>
 </form></div>
@@ -218,7 +217,8 @@ small.sub{display:block;font-size:11px;color:var(--muted);font-weight:400}
   <input type="search" id="q" placeholder="現場名・正式名称で検索">
   <span class="chip" id="addsite">＋物件</span>
   <span class="chip" id="reload">更新</span>
-  <span class="chip" id="admin" title="職人とパスワードの管理（会議用パスワードのときだけ）">⚙管理</span>
+  <span class="chip tog" id="meetchip" title="金額入りの会議用の表示に切り替える（この端末で覚えます）">会議表示</span>
+  <span class="chip" id="admin" title="アカウントとパスワードの管理（管理用で入ったときだけ）">⚙管理</span>
   <span class="chip" id="who" title="記録者を切り替える"></span>
 </header>
 <div id="map"></div>
@@ -295,7 +295,8 @@ function dist(a, b) { const R = 6371000, toR = x => x * Math.PI / 180; const dLa
 // 端末に残すキャッシュには金額を入れない（会議用PC以外に残らないように）
 // sitesX（表示用に作った物件。会議用だと各物件に amount が入る）も外す
 const saveCache = () => { const { amounts, sitesX, ...rest } = DATA; if (rest.role === 'meeting') delete rest.role; store.set('cache', JSON.stringify(rest)); };
-let MEET = false; // 会議用パスワードで入ったとき true（金額を出す）
+let MEET = false; // 会議表示のとき true（金額を出す・大きい文字・全件）。管理用のアカウントだけ「会議表示」で切り替えられる
+let ADMIN = false; // 管理用のアカウントで入ったとき true
 let WORKER = false; // 職人の個人アカウントで入ったとき true（担当の物件だけ・見る＋訪問記録だけ）
 let MOTO_ORDER = [];
 const motoIdx = m => { const i = MOTO_ORDER.indexOf(m); return i < 0 ? 999 : i; };
@@ -325,11 +326,14 @@ function build() {
   const extra = {}; (DATA.extra || []).forEach(e => extra[e['現場名']] = e);
   const visits = {}; (DATA.visits || []).forEach(v => (visits[v['現場名']] = visits[v['現場名']] || []).push(v));
   Object.values(visits).forEach(a => a.sort((x, y) => y['日時'].localeCompare(x['日時'])));
-  MEET = DATA.role === 'meeting';
+  ADMIN = DATA.role === 'meeting'; // 管理用（2026-11-16〜 業務部と会議用を1つにした）
+  MEET = ADMIN && store.get('meet') !== '0'; // 会議表示は端末ごとに覚える（最初は会議表示）
+  document.body.classList.toggle('admin', ADMIN);
+  $('#meetchip').classList.toggle('on', MEET);
   WORKER = DATA.role === 'worker';
   document.body.classList.toggle('meet', MEET);
   document.body.classList.toggle('worker', WORKER);
-  if (WORKER && DATA.me) { store.set('user', DATA.me); $('#who').textContent = '👤 ' + DATA.me; }
+  if (DATA.me) { store.set('user', DATA.me); $('#who').textContent = '👤 ' + DATA.me; } // 記録者＝パスワードの人（2026-11-16〜）
   const am = {}; (DATA.amounts || []).forEach(a => am[a['現場名']] = a['金額（千円）']);
   const dw = {}; (DATA.drawings || []).forEach(x => (dw[x['現場名']] = dw[x['現場名']] || []).push(x));
   const motos = new Set(), workers = new Set();
@@ -753,7 +757,7 @@ function openForm(mode, s) {
     <label class="fl2">消検月<select class="f" id="f_ym">${mopts(d.ym)}</select></label>
     <label class="fl2">注意点<textarea id="f_note">${esc(d.note)}</textarea></label>
     <div class="fl2">図面〜搬入（タップで 空→〇→／→△）<div class="flags" id="f_flags">${formFlags(d)}</div></div>
-    ${MEET ? `<label class="fl2">金額（千円）<input class="f" id="f_amount" inputmode="decimal" value="${esc(d.amount)}" placeholder="例：1340"></label>` : '<div class="gps">金額は会議用パスワードで入ったときに入力できます</div>'}
+    ${MEET ? `<label class="fl2">金額（千円）<input class="f" id="f_amount" inputmode="decimal" value="${esc(d.amount)}" placeholder="例：1340"></label>` : '<div class="gps">金額は管理用のアカウントで「会議表示」のときに入力できます</div>'}
     ${mode === 'edit' && !s['手入力'] ? '<div class="gps">Excelの物件です。ここで変えた値は、Excelでその欄が書き換えられるまで優先されます（書き換えられたらExcelの値に戻ります）</div>' : ''}` : ''}
     ${withPos ? `<label class="fl2">住所<input class="f" id="f_addr" value="${esc(d.addr)}" placeholder="例：札幌市中央区北2条西22丁目（空なら現場名から推定）"></label>
     <div class="row"><button class="btn sub sm" id="f_here">現在地にする</button><button class="btn sub sm" id="f_pick">地図をタップして決める</button></div>
@@ -825,44 +829,47 @@ function openForm(mode, s) {
     } catch (e) { toast('保存失敗：' + e.message); btn.disabled = false; }
   };
 }
-// ===== 管理（会議用パスワードのときだけ）：職人の追加・パスワード =====
-const genPw = () => { const c = 'abcdefghjkmnpqrstuvwxyz23456789', a = new Uint32Array(8); crypto.getRandomValues(a); return [...a].map(x => c[x % c.length]).join(''); };
+// ===== 管理（管理用のアカウントのときだけ）：アカウントの追加・パスワード =====
+const genPw = base => { const c = 'abcdefghjkmnpqrstuvwxyz23456789', a = new Uint32Array(3); crypto.getRandomValues(a); const tail = [...a].map(x => c[x % c.length]).join(''); return (/^[a-z]+$/i.test(base || '') ? base.toLowerCase() : 'name') + tail; }; // 例 komatsu7k3（名前が漢字のときは name○○○ になるので、name をローマ字の苗字に書き換える）
 async function openAdmin() {
   flushFlags(); cancelPick(); curSite = null;
-  $('#s_title').innerHTML = '管理<small>職人とパスワード（会議用で入ったときだけ）</small>';
+  $('#s_title').innerHTML = '管理<small>アカウントとパスワード（管理用で入ったときだけ）</small>';
   $('#s_body').innerHTML = '<div class="sec">読み込み中…</div>'; $('#sheet').classList.add('open');
   let j; try { j = await post({ action: 'listAccounts' }); } catch (e) { $('#s_body').innerHTML = `<div class="sec">${esc(e.message)}</div>`; return; }
-  const row = a => `<tr data-n="${esc(a.name)}"><td><input class="a_name" value="${esc(a.name)}"></td><td><input class="a_pw" value="${esc(a.pw)}"></td><td><input class="a_w" value="${esc(a.worker)}"></td>
-    <td class="b"><button class="btn sub sm a_gen">作る</button> <button class="btn sm a_save">保存</button> <button class="del a_del">削除</button></td></tr>`;
+  const KINDS = [['admin', '管理用'], ['staff', '社内'], ['worker', '外注（職人）']];
+  const kindSel = (cls, cur) => `<select class="${cls}">${KINDS.map(([v, t]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
+  const row = a => `<tr data-n="${esc(a.name)}"><td><input class="a_name" value="${esc(a.name)}"></td><td>${kindSel('a_kind', a.kind)}</td><td><input class="a_pw" value="${esc(a.pw)}"></td><td><input class="a_w" value="${esc(a.worker)}" placeholder="${a.kind === 'worker' ? '' : '（外注だけ）'}"></td>
+    <td class="b"><button class="btn sub sm a_gen">作る</button> <button class="btn sm a_save">保存</button> ${a.name === DATA.me ? '' : '<button class="del a_del">削除</button>'}</td></tr>`;
   $('#s_body').innerHTML = `
-  <div class="sec"><h3>職人（${j.accounts.length}人）</h3>
-    <table class="adm"><thead><tr><th>名前</th><th>パスワード</th><th>担当名</th><th></th></tr></thead><tbody>${j.accounts.map(row).join('')}</tbody></table>
-    <div class="gps" style="margin-top:6px">担当名＝Excel・物件の「職人」欄に書く名前（その名前の物件だけが見えます）。パスワードを空にすると、ログインはできず職人の候補にだけ出ます。「作る」でパスワードを自動で作ります（保存を押すまで変わりません）</div></div>
-  <div class="sec"><h3>職人を追加</h3>
-    <table class="adm"><tbody><tr><td><input id="n_name" placeholder="名前（例：阿部）"></td><td><input id="n_pw" placeholder="パスワード"></td><td><input id="n_w" placeholder="担当名（空なら名前）"></td>
-    <td class="b"><button class="btn sub sm" id="n_gen">作る</button> <button class="btn sm" id="n_add">追加</button></td></tr></tbody></table></div>
-  <div class="sec"><h3>共通のパスワード</h3>
-    <table class="adm"><tbody>
-    <tr><td style="width:7em">普段用</td><td><input id="p_normal" value="${esc(j.normalPw)}"></td><td class="b"><button class="btn sm" id="p_normal_s">変更</button></td></tr>
-    <tr><td>会議用</td><td><input id="p_meeting" value="${esc(j.meetingPw)}"></td><td class="b"><button class="btn sm" id="p_meeting_s">変更</button></td></tr></tbody></table>
-    <div class="gps">普段用を変えると、小松さん・徳田さんなど普段用で入っている人は次に開いたとき入り直しになります。会議用を変えると、この端末は新しいパスワードで入り直します</div></div>`;
+  <div class="sec"><h3>アカウント（${j.accounts.length}人）</h3>
+    <table class="adm"><thead><tr><th>名前（記録者）</th><th>種別</th><th>パスワード</th><th>担当名</th><th></th></tr></thead><tbody>${j.accounts.map(row).join('')}</tbody></table>
+    <div class="gps" style="margin-top:6px">パスワードだけで入ります（人ごとに違うパスワードにしてください）。記録はここの「名前」で残ります。<br>
+    管理用＝金額が見え、この画面を使える／社内＝金額なし／外注＝担当名（Excel・物件の「職人」欄の名前）の物件だけ見えて訪問記録だけ付けられる。<br>
+    外注はパスワードを空にするとログインできず、職人の候補にだけ出ます。「作る」で名前＋英数3文字のパスワードを作ります（保存を押すまで変わりません）</div></div>
+  <div class="sec"><h3>アカウントを追加</h3>
+    <table class="adm"><tbody><tr><td><input id="n_name" placeholder="名前（例：阿部）"></td><td>${kindSel('', 'worker').replace('<select', '<select id="n_kind"')}</td><td><input id="n_pw" placeholder="パスワード"></td><td><input id="n_w" placeholder="担当名（外注・空なら名前）"></td>
+    <td class="b"><button class="btn sub sm" id="n_gen">作る</button> <button class="btn sm" id="n_add">追加</button></td></tr></tbody></table></div>`;
   const run = async (body, msg) => { try { await post(body); toast(msg); await load(true); openAdmin(); } catch (e) { toast(e.message); } };
   $('#s_body').querySelectorAll('tr[data-n]').forEach(tr => {
     const v = c => tr.querySelector(c).value.trim();
-    tr.querySelector('.a_gen').onclick = () => { tr.querySelector('.a_pw').value = genPw(); };
-    tr.querySelector('.a_save').onclick = () => run({ action: 'saveAccount', oldName: tr.dataset.n, name: v('.a_name'), newPw: v('.a_pw'), worker: v('.a_w') }, '保存しました');
-    tr.querySelector('.a_del').onclick = () => { if (confirm(`職人「${tr.dataset.n}」を削除します（ログインできなくなります。物件や訪問記録は消えません）。よろしいですか？`)) run({ action: 'deleteAccount', name: tr.dataset.n }, '削除しました'); };
+    tr.querySelector('.a_gen').onclick = () => { tr.querySelector('.a_pw').value = genPw(v('.a_name')); };
+    tr.querySelector('.a_save').onclick = async () => {
+      const name = v('.a_name'), newPw = v('.a_pw');
+      if (name === DATA.me && newPw !== store.get('pw') && !confirm('いま入っているアカウントのパスワードを変えます。この端末も新しいパスワードで入り直します。よろしいですか？')) return;
+      try {
+        await post({ action: 'saveAccount', oldName: tr.dataset.n, name, kind: v('.a_kind'), newPw, worker: v('.a_w') });
+        if (tr.dataset.n === DATA.me) { store.set('pw', newPw); store.set('user', name); }
+        toast('保存しました'); await load(true); openAdmin();
+      } catch (e) { toast(e.message); }
+    };
+    const del = tr.querySelector('.a_del');
+    if (del) del.onclick = () => { if (confirm(`「${tr.dataset.n}」のアカウントを削除します（ログインできなくなります。物件や訪問記録は消えません）。よろしいですか？`)) run({ action: 'deleteAccount', name: tr.dataset.n }, '削除しました'); };
   });
-  $('#n_gen').onclick = () => { $('#n_pw').value = genPw(); };
-  $('#n_add').onclick = () => run({ action: 'saveAccount', isNew: true, name: $('#n_name').value.trim(), newPw: $('#n_pw').value.trim(), worker: $('#n_w').value.trim() }, '追加しました');
-  const shared = kind => async () => {
-    const pw = $('#p_' + kind).value.trim();
-    if (!confirm(`${kind === 'meeting' ? '会議用' : '普段用'}のパスワードを「${pw}」に変えます。よろしいですか？`)) return;
-    try { await post({ action: 'setSharedPw', kind, newPw: pw }); if (kind === 'meeting') store.set('pw', pw); toast('変更しました'); await load(true); openAdmin(); } catch (e) { toast(e.message); }
-  };
-  $('#p_normal_s').onclick = shared('normal'); $('#p_meeting_s').onclick = shared('meeting');
+  $('#n_gen').onclick = () => { $('#n_pw').value = genPw($('#n_name').value.trim()); };
+  $('#n_add').onclick = () => run({ action: 'saveAccount', isNew: true, name: $('#n_name').value.trim(), kind: $('#n_kind').value, newPw: $('#n_pw').value.trim(), worker: $('#n_w').value.trim() }, '追加しました');
 }
 $('#admin').onclick = openAdmin;
+$('#meetchip').onclick = () => { store.set('meet', MEET ? '0' : '1'); build(); };
 
 // フォームの切り替えボタン（図面〜搬入）
 function formFlags(d) {
@@ -913,27 +920,12 @@ window.addEventListener('resize', setHH); setHH();
     if (r === 'auth') showLogin(); else locate();
   } else showLogin();
 })();
-// 記録者の名前は設定シートにあり、ログイン画面を開いたときにパスワードなしで取る
-async function fetchUsers() {
-  try {
-    const j = await rpc('users', {});
-    if (j.ok && j.users) { store.set('users', j.users.join(',')); fillUsers(j.users); }
-  } catch (e) {}
-}
-function fillUsers(list) {
-  const sel = $('#l_user'), prev = sel.value; sel.innerHTML = '';
-  if (list && list.length) { sel.add(new Option('選んでください', '')); list.forEach(u => sel.add(new Option(u))); }
-  else sel.innerHTML = '<option value="">（読み込み中…）</option>';
-  const keep = prev || store.get('user');
-  if (keep && list && list.includes(keep)) sel.value = keep;
-}
+// ログイン：パスワードだけ（2026-11-16〜。パスワードで人が決まり、記録者はその人の名前）
 function showLogin() {
   pending = null; // 前に確かめた結果（古いデータ）を使い回さない
-  $('#l_user').disabled = false;
   $('#login').style.display = 'flex';
-  const cached = store.get('users'); fillUsers(cached ? cached.split(',') : null);
-  if (store.get('pw')) $('#l_pw').value = store.get('pw');
-  fetchUsers();
+  $('#l_pw').value = '';
+  setTimeout(() => $('#l_pw').focus(), 50);
 }
 var pending = null; // パスワード確認の結果（{pw, j}）。init より前に使うので var（let だと宣言前に触れてエラー）
 async function checkPw() {
@@ -943,19 +935,14 @@ async function checkPw() {
   const j = await rpc('load', { p_pw: pw });
   if (!j.ok) { $('#l_msg').textContent = j.error; return null; }
   pending = { pw, j };
-  if (j.role === 'worker') { fillUsers([j.me]); $('#l_user').value = j.me; $('#l_user').disabled = true; } // 個人のパスワードなら記録者は本人に決まる
-  else { $('#l_user').disabled = false; store.set('users', j.users.join(',')); fillUsers(j.users); }
   return j;
 }
-$('#l_pw').onchange = () => checkPw().catch(() => $('#l_msg').textContent = '通信エラー');
 $('#loginf').onsubmit = async e => {
   e.preventDefault();
   try {
     const j = await checkPw(); if (!j) return;
-    const user = j.role === 'worker' ? j.me : $('#l_user').value;
-    if (!user) { $('#l_msg').textContent = '記録者を選んでください'; return; }
-    store.set('pw', $('#l_pw').value); store.set('user', user); DATA = j; pending = null; saveCache();
-    $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + user; build(); setHH(); locate();
+    store.set('pw', $('#l_pw').value); store.set('user', j.me); DATA = j; pending = null; saveCache();
+    $('#login').style.display = 'none'; $('#who').textContent = '👤 ' + j.me; build(); setHH(); locate();
   } catch (err) { $('#l_msg').textContent = '通信エラー'; }
 };
 $('#who').onclick = () => showLogin();
