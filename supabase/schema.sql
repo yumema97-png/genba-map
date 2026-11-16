@@ -101,8 +101,13 @@ create or replace function _auth(p_pw text) returns jsonb language sql stable as
                               'name', "名前", 'worker', coalesce(nullif("担当名", ''), "名前"))
     from accounts where coalesce(p_pw, '') <> '' and "パスワード" = p_pw limit 1), jsonb_build_object('role', '')) $$;
 
+-- 接続元のIP。x-forwarded-for の先頭は送る側が好きに書けるので使わない（2026-11-17 確認）。
+-- cf-connecting-ip は Cloudflare が付け直す（送る側が付けると 403 で弾かれる）
 create or replace function _ip() returns text language sql stable as $$
-  select btrim(split_part(coalesce(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ''), ',', 1)) $$;
+  with h as (select coalesce(current_setting('request.headers', true), '{}')::json j)
+  select coalesce(nullif(btrim(j ->> 'cf-connecting-ip'), ''), nullif(btrim(j ->> 'sb-forwarded-for'), ''),
+                  btrim(reverse(split_part(reverse(coalesce(j ->> 'x-forwarded-for', '')), ',', 1))))
+  from h $$;
 
 -- パスワードを確かめる（間違いを数える）。同じ所から15分に20回まちがえたら15分は通さない
 create or replace function _auth_try(p_pw text) returns jsonb language plpgsql as $$
