@@ -289,6 +289,22 @@ function locate() {
     const g = $('#gps'); if (g) g.textContent = gpsText();
   }, () => {}, { enableHighAccuracy: true, maximumAge: 10000 });
 }
+// 現在地に戻るボタン（ズームの上）。位置がまだ取れていなければ取りに行く
+const LocBtn = L.Control.extend({ options: { position: 'bottomleft' }, onAdd() {
+  const d = L.DomUtil.create('div', 'leaflet-bar');
+  d.innerHTML = '<a href="#" title="現在地に戻る" role="button" style="font-size:18px;line-height:30px">◎</a>';
+  L.DomEvent.disableClickPropagation(d);
+  d.firstChild.onclick = e => {
+    e.preventDefault();
+    const go = p => map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16));
+    if (myPos) return go(myPos);
+    if (!navigator.geolocation) return alert('この端末では現在地が使えません');
+    navigator.geolocation.getCurrentPosition(p => go({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => alert('現在地が取れません（位置情報の許可を確認してください）'), { enableHighAccuracy: true, timeout: 10000 });
+  };
+  return d;
+} });
+new LocBtn().addTo(map);
 function dist(a, b) { const R = 6371000, toR = x => x * Math.PI / 180; const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng); const s = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(s)); }
 
 // ===== データ =====
